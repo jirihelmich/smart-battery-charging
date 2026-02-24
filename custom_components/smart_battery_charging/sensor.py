@@ -152,6 +152,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
             "start_soc": f"{d['last_session'].start_soc:.1f}%" if d.get("last_session") else "N/A",
             "end_soc": f"{d['last_session'].end_soc:.1f}%" if d.get("last_session") else "N/A",
             "result": d["last_charge_result"],
+            "history": d["charge_history_raw"],
         },
     ),
     SmartBatterySensorDescription(

@@ -336,6 +336,9 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Charging status
         charging_status = self._compute_charging_status(soc)
 
+        # Charge history
+        charge_history = self.store.charge_history
+
         # Last session
         last_session = self.store.last_session
         last_kwh = last_session.kwh_charged(capacity_kwh) if last_session else 0.0
@@ -395,6 +398,7 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_charge_time_range": self._format_time_range(last_session),
             "last_charge_total_cost": last_cost,
             "last_charge_result": last_session.result if last_session else "",
+            "charge_history_raw": charge_history,
             # Settings (for sensor attributes)
             "currency": self.currency,
             "enabled": self.enabled,

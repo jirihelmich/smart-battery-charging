@@ -158,6 +158,35 @@ views:
             grid_options:
               columns: 12
             series:
+              - entity: sensor.smart_battery_charging_last_night_charge_kwh
+                type: column
+                name: Night Charges
+                float_precision: 1
+                unit: ' kWh'
+                color: '#4caf50'
+                show:
+                  in_header: true
+                data_generator: >
+                  const h = entity.attributes.history;
+                  if (!h || !Array.isArray(h) || h.length === 0) return [];
+                  const now = new Date();
+                  return h.map((v, i) => {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - 1 - i);
+                    d.setHours(12, 0, 0, 0);
+                    return [d.getTime(), v];
+                  }).reverse();
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            grid_options:
+              columns: 12
+            series:
               - entity: sensor.smart_battery_charging_solar_forecast_error_average
                 type: column
                 name: PV Forecast Error
