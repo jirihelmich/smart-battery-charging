@@ -50,11 +50,15 @@ class SmartBatterySwitch(SwitchEntity):
     async def async_turn_on(self, **kwargs) -> None:
         """Turn on the switch."""
         self.coordinator.enabled = True
+        if self.coordinator.state_machine is not None:
+            await self.coordinator.state_machine.async_on_enable()
         self.async_write_ha_state()
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn off the switch."""
         self.coordinator.enabled = False
+        if self.coordinator.state_machine is not None:
+            await self.coordinator.state_machine.async_on_disable()
         self.async_write_ha_state()
         await self.coordinator.async_request_refresh()

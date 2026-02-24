@@ -7,11 +7,16 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+if TYPE_CHECKING:
+    from .charging_controller import ChargingStateMachine
+    from .inverter_controller import InverterController
+    from .planner import ChargingPlanner
 
 from .const import (
     CONF_BATTERY_CAPACITY,
@@ -86,6 +91,11 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.enabled: bool = True
         self.charging_state: ChargingState = ChargingState.IDLE
         self.current_schedule: ChargingSchedule | None = None
+
+        # Phase 2 components (set from __init__.py after construction)
+        self.inverter: InverterController | None = None
+        self.state_machine: ChargingStateMachine | None = None
+        self.planner: ChargingPlanner | None = None
 
     def _opt(self, key: str, default: Any) -> Any:
         """Get a config value, preferring options over data."""
@@ -229,6 +239,38 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def daily_consumption_current(self) -> float:
         """Today's consumption so far."""
         return self._get_state_float(self.entry.data.get(CONF_CONSUMPTION_SENSOR, ""))
+
+    # --- Daily recorders ---
+
+    async def async_record_daily_consumption(self) -> None:
+        """Record today's consumption value to history (called at 23:55)."""
+        value = self.daily_consumption_current
+        if value <= 0:
+            _LOGGER.warning("Daily consumption is %.1f, skipping recording", value)
+            return
+
+        history = self.store.consumption_history
+        new_history = self.consumption_tracker.add_entry(history, value)
+        await self.store.async_set_consumption_history(new_history)
+        _LOGGER.info("Recorded daily consumption: %.2f kWh (%d days tracked)", value, len(new_history))
+
+    async def async_record_forecast_error(self) -> None:
+        """Record today's forecast error to history (called at 23:55)."""
+        forecast = self.solar_forecast_today
+        actual = self.actual_solar_today
+
+        error = self.forecast_corrector.compute_error(forecast, actual)
+        if error is None:
+            _LOGGER.debug("Skipping forecast error recording (forecast too low: %.1f)", forecast)
+            return
+
+        history = self.store.forecast_error_history
+        new_history = self.forecast_corrector.add_entry(history, error)
+        await self.store.async_set_forecast_error_history(new_history)
+        _LOGGER.info(
+            "Recorded forecast error: forecast=%.1f, actual=%.1f, error=%.1f%%",
+            forecast, actual, error * 100,
+        )
 
     # --- Main update ---
 
