@@ -1,0 +1,13 @@
+[project]
+name = "smart-battery-charging"
+version = "0.1.0"
+description = "Smart Battery Charging integration for Home Assistant"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100

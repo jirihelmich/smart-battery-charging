@@ -1,0 +1,11 @@
+{
+  "domain": "smart_battery_charging",
+  "name": "Smart Battery Charging",
+  "codeowners": ["@jirihelmich"],
+  "config_flow": true,
+  "documentation": "https://github.com/jirihelmich/smart-battery-charging",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/jirihelmich/smart-battery-charging/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

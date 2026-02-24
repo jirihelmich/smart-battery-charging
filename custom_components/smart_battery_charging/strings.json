@@ -1,0 +1,129 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smart Battery Charging",
+        "description": "Set up smart battery charging for your inverter.",
+        "data": {
+          "name": "Name"
+        }
+      },
+      "inverter": {
+        "title": "Inverter Entities",
+        "description": "Select the entities from your inverter integration.",
+        "data": {
+          "inverter_soc_sensor": "Battery SOC sensor",
+          "inverter_capacity_sensor": "Battery capacity sensor (Wh)",
+          "inverter_actual_solar_sensor": "Actual solar production sensor (daily, resets at midnight)",
+          "inverter_mode_select": "Inverter mode select entity",
+          "inverter_charge_command_select": "Charge command select entity",
+          "inverter_charge_soc_limit": "Charge SOC limit number entity",
+          "inverter_discharge_min_soc": "Discharge min SOC number entity (optional)"
+        }
+      },
+      "inverter_values": {
+        "title": "Inverter Mode Values",
+        "description": "Select the option values for each inverter mode.",
+        "data": {
+          "mode_self_use": "Self Use mode option",
+          "mode_manual": "Manual mode option",
+          "charge_force": "Force Charge command option",
+          "charge_stop": "Stop Charge command option"
+        }
+      },
+      "price": {
+        "title": "Electricity Price",
+        "description": "Configure the electricity price sensor.",
+        "data": {
+          "price_sensor": "Spot electricity price sensor",
+          "price_attribute_format": "Price attribute format"
+        }
+      },
+      "solar": {
+        "title": "Solar Forecast",
+        "description": "Select solar forecast sensors. If you have multiple panel orientations, select all of them.",
+        "data": {
+          "solar_forecast_today": "Today's solar forecast sensor(s)",
+          "solar_forecast_tomorrow": "Tomorrow's solar forecast sensor(s)"
+        }
+      },
+      "consumption": {
+        "title": "Consumption",
+        "description": "Select the daily house consumption sensor (should reset at midnight).",
+        "data": {
+          "consumption_sensor": "Daily consumption sensor"
+        }
+      },
+      "settings": {
+        "title": "Charging Settings",
+        "description": "Configure battery and charging parameters.",
+        "data": {
+          "battery_capacity": "Battery capacity (kWh)",
+          "max_charge_level": "Max charge level (%)",
+          "min_soc": "Minimum SOC (%)",
+          "max_charge_power": "Max charge power (kW)",
+          "max_charge_price": "Max acceptable charge price",
+          "fallback_consumption": "Fallback daily consumption (kWh)",
+          "window_start_hour": "Charging window start hour",
+          "window_end_hour": "Charging window end hour",
+          "currency": "Price unit (e.g. Kč/kWh)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Charging Settings",
+        "description": "Adjust battery and charging parameters.",
+        "data": {
+          "battery_capacity": "Battery capacity (kWh)",
+          "max_charge_level": "Max charge level (%)",
+          "min_soc": "Minimum SOC (%)",
+          "max_charge_power": "Max charge power (kW)",
+          "max_charge_price": "Max acceptable charge price",
+          "fallback_consumption": "Fallback daily consumption (kWh)",
+          "window_start_hour": "Charging window start hour",
+          "window_end_hour": "Charging window end hour",
+          "currency": "Price unit (e.g. Kč/kWh)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "average_daily_consumption": { "name": "Average Daily Consumption" },
+      "today_solar_forecast": { "name": "Today Solar Forecast" },
+      "tomorrow_solar_forecast": { "name": "Tomorrow Solar Forecast" },
+      "solar_forecast_error_average": { "name": "Solar Forecast Error Average" },
+      "today_solar_forecast_error": { "name": "Today Solar Forecast Error" },
+      "tomorrow_energy_forecast": { "name": "Tomorrow Energy Forecast" },
+      "battery_charge_kwh": { "name": "Battery Charge kWh" },
+      "battery_usable_charge": { "name": "Battery Usable Charge" },
+      "battery_capacity_to_max": { "name": "Battery Capacity to Max" },
+      "night_charging_status": { "name": "Night Charging Status" },
+      "last_night_charge_kwh": { "name": "Last Night Charge kWh" },
+      "last_charge_battery_range": { "name": "Last Charge Battery Range" },
+      "last_charge_time_range": { "name": "Last Charge Time Range" },
+      "last_charge_total_cost": { "name": "Last Charge Total Cost" },
+      "electricity_price_status": { "name": "Electricity Price Status" },
+      "today_cheapest_hours": { "name": "Today Cheapest Hours" },
+      "tomorrow_cheapest_hours": { "name": "Tomorrow Cheapest Hours" }
+    },
+    "binary_sensor": {
+      "charging_active": { "name": "Charging Active" },
+      "charging_recommended": { "name": "Charging Recommended" }
+    },
+    "number": {
+      "battery_capacity": { "name": "Battery Capacity" },
+      "max_charge_level": { "name": "Max Charge Level" },
+      "min_soc": { "name": "Min SOC" },
+      "max_charge_power": { "name": "Max Charge Power" },
+      "max_charge_price": { "name": "Max Charge Price" },
+      "fallback_consumption": { "name": "Fallback Consumption" }
+    },
+    "switch": {
+      "enabled": { "name": "Enabled" }
+    }
+  }
+}
