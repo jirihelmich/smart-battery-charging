@@ -3,6 +3,7 @@
 DOMAIN = "smart_battery_charging"
 
 # Config flow steps
+CONF_INVERTER_TEMPLATE = "inverter_template"
 CONF_INVERTER_SOC_SENSOR = "inverter_soc_sensor"
 CONF_INVERTER_CAPACITY_SENSOR = "inverter_capacity_sensor"
 CONF_INVERTER_ACTUAL_SOLAR_SENSOR = "inverter_actual_solar_sensor"
@@ -40,6 +41,7 @@ CONF_WINDOW_END_HOUR = "window_end_hour"
 CONF_CURRENCY = "currency"
 
 # Defaults
+DEFAULT_INVERTER_TEMPLATE = "custom"
 DEFAULT_BATTERY_CAPACITY = 15.0
 DEFAULT_MAX_CHARGE_LEVEL = 90.0
 DEFAULT_MIN_SOC = 20.0
@@ -66,6 +68,19 @@ FORECAST_ERROR_WINDOW_DAYS = 7
 
 # Charge history
 CHARGE_HISTORY_DAYS = 7
+
+# Notifications
+CONF_NOTIFICATION_SERVICE = "notification_service"
+CONF_NOTIFY_PLANNING = "notify_planning"
+CONF_NOTIFY_CHARGING_START = "notify_charging_start"
+CONF_NOTIFY_CHARGING_COMPLETE = "notify_charging_complete"
+CONF_NOTIFY_MORNING_SAFETY = "notify_morning_safety"
+
+DEFAULT_NOTIFICATION_SERVICE = ""
+DEFAULT_NOTIFY_PLANNING = True
+DEFAULT_NOTIFY_CHARGING_START = True
+DEFAULT_NOTIFY_CHARGING_COMPLETE = True
+DEFAULT_NOTIFY_MORNING_SAFETY = True
 
 # Platforms
 PLATFORMS = ["sensor", "binary_sensor", "number", "switch"]

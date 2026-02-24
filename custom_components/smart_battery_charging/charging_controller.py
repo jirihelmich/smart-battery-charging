@@ -15,6 +15,7 @@ from .models import ChargingSchedule, ChargingSession, ChargingState
 if TYPE_CHECKING:
     from .coordinator import SmartBatteryCoordinator
     from .inverter_controller import InverterController
+    from .notifier import ChargingNotifier
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,9 +27,11 @@ class ChargingStateMachine:
         self,
         coordinator: SmartBatteryCoordinator,
         inverter: InverterController,
+        notifier: ChargingNotifier | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._inverter = inverter
+        self._notifier = notifier
         self._session: ChargingSession | None = None
 
     @property
@@ -148,6 +151,11 @@ class ChargingStateMachine:
 
         self.state = ChargingState.CHARGING
 
+        if self._notifier:
+            await self._notifier.async_notify_charging_started(
+                soc, schedule.target_soc, schedule.required_kwh
+            )
+
     async def _handle_charging_tick(self) -> None:
         """Handle tick while in CHARGING state."""
         schedule = self.schedule
@@ -169,6 +177,10 @@ class ChargingStateMachine:
                 self._session.result = "Target reached"
             await self._save_session()
             self.state = ChargingState.COMPLETE
+            if self._notifier and self._session:
+                await self._notifier.async_notify_charging_complete(
+                    self._session, schedule.target_soc
+                )
             return
 
         if not self._is_in_window(schedule):
@@ -181,6 +193,10 @@ class ChargingStateMachine:
                 self._session.result = "Window ended"
             await self._save_session()
             self.state = ChargingState.COMPLETE
+            if self._notifier and self._session:
+                await self._notifier.async_notify_charging_complete(
+                    self._session, schedule.target_soc
+                )
             return
 
         # Still charging, nothing to do
@@ -205,6 +221,8 @@ class ChargingStateMachine:
                 self._session.result = "Morning safety stop"
             await self._save_session()
             self.state = ChargingState.IDLE
+            if self._notifier:
+                await self._notifier.async_notify_morning_safety(soc)
         elif self._inverter.is_manual_mode(current_mode):
             _LOGGER.warning("Morning safety: inverter in Manual Mode, restoring Self Use")
             await self._inverter.async_stop_charging(self._coordinator.min_soc)

@@ -8,9 +8,16 @@
           "name": "Name"
         }
       },
+      "inverter_template": {
+        "title": "Inverter Type",
+        "description": "Select your inverter integration for pre-filled configuration.",
+        "data": {
+          "inverter_template": "Inverter integration"
+        }
+      },
       "inverter": {
         "title": "Inverter Entities",
-        "description": "Select the entities from your inverter integration.",
+        "description": "Select the entities from your inverter integration ({template_name}).\n{entity_hints}",
         "data": {
           "inverter_soc_sensor": "Battery SOC sensor",
           "inverter_capacity_sensor": "Battery capacity sensor (Wh)",
@@ -85,7 +92,12 @@
           "fallback_consumption": "Fallback daily consumption (kWh)",
           "window_start_hour": "Charging window start hour",
           "window_end_hour": "Charging window end hour",
-          "currency": "Price unit (e.g. Kč/kWh)"
+          "currency": "Price unit (e.g. Kč/kWh)",
+          "notification_service": "Notification service name (e.g. mobile_app_phone, leave empty to disable)",
+          "notify_planning": "Notify: Charging plan",
+          "notify_charging_start": "Notify: Charging started",
+          "notify_charging_complete": "Notify: Charging complete",
+          "notify_morning_safety": "Notify: Morning safety"
         }
       }
     }

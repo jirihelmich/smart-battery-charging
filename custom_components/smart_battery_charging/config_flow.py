@@ -25,12 +25,18 @@ from .const import (
     CONF_INVERTER_DISCHARGE_MIN_SOC,
     CONF_INVERTER_MODE_SELECT,
     CONF_INVERTER_SOC_SENSOR,
+    CONF_INVERTER_TEMPLATE,
     CONF_MAX_CHARGE_LEVEL,
     CONF_MAX_CHARGE_POWER,
     CONF_MAX_CHARGE_PRICE,
     CONF_MIN_SOC,
     CONF_MODE_MANUAL,
     CONF_MODE_SELF_USE,
+    CONF_NOTIFICATION_SERVICE,
+    CONF_NOTIFY_CHARGING_COMPLETE,
+    CONF_NOTIFY_CHARGING_START,
+    CONF_NOTIFY_MORNING_SAFETY,
+    CONF_NOTIFY_PLANNING,
     CONF_PRICE_ATTRIBUTE_FORMAT,
     CONF_PRICE_SENSOR,
     CONF_SOLAR_FORECAST_TODAY,
@@ -40,10 +46,16 @@ from .const import (
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_CURRENCY,
     DEFAULT_FALLBACK_CONSUMPTION,
+    DEFAULT_INVERTER_TEMPLATE,
     DEFAULT_MAX_CHARGE_LEVEL,
     DEFAULT_MAX_CHARGE_POWER,
     DEFAULT_MAX_CHARGE_PRICE,
     DEFAULT_MIN_SOC,
+    DEFAULT_NOTIFICATION_SERVICE,
+    DEFAULT_NOTIFY_CHARGING_COMPLETE,
+    DEFAULT_NOTIFY_CHARGING_START,
+    DEFAULT_NOTIFY_MORNING_SAFETY,
+    DEFAULT_NOTIFY_PLANNING,
     DEFAULT_PRICE_ATTRIBUTE_FORMAT,
     DEFAULT_WINDOW_END_HOUR,
     DEFAULT_WINDOW_START_HOUR,
@@ -51,6 +63,7 @@ from .const import (
     PRICE_FORMAT_HOUR_INT,
     PRICE_FORMAT_ISO_DATETIME,
 )
+from .inverter_templates import INVERTER_TEMPLATES, get_template
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,7 +104,7 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step 1: Name."""
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_inverter()
+            return await self.async_step_inverter_template()
 
         return self.async_show_form(
             step_id="user",
@@ -102,13 +115,51 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
         )
 
+    async def async_step_inverter_template(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Step 2: Select inverter integration template."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_inverter()
+
+        template_options = [
+            selector.SelectOptionDict(value=tid, label=tmpl.label)
+            for tid, tmpl in INVERTER_TEMPLATES.items()
+        ]
+
+        return self.async_show_form(
+            step_id="inverter_template",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_INVERTER_TEMPLATE,
+                        default=DEFAULT_INVERTER_TEMPLATE,
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=template_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                }
+            ),
+        )
+
     async def async_step_inverter(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 2: Inverter entity selectors."""
+        """Step 3: Inverter entity selectors."""
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_inverter_values()
+
+        template = get_template(
+            self._data.get(CONF_INVERTER_TEMPLATE, DEFAULT_INVERTER_TEMPLATE)
+        )
+        hints = template.entity_hints
+        hint_lines = "\n".join(
+            f"- **{key}**: {hint}" for key, hint in hints.items()
+        ) if hints else ""
 
         return self.async_show_form(
             step_id="inverter",
@@ -123,17 +174,25 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Optional(CONF_INVERTER_DISCHARGE_MIN_SOC): _entity_selector("number"),
                 }
             ),
+            description_placeholders={
+                "template_name": template.label,
+                "entity_hints": hint_lines,
+            },
         )
 
     async def async_step_inverter_values(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 3: Inverter option strings."""
+        """Step 4: Inverter option strings (pre-filled from template)."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_price()
+
+        template = get_template(
+            self._data.get(CONF_INVERTER_TEMPLATE, DEFAULT_INVERTER_TEMPLATE)
+        )
 
         # Try to get options from the mode select entity
         mode_options = await self._get_select_options(
@@ -143,20 +202,26 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
             self._data.get(CONF_INVERTER_CHARGE_COMMAND_SELECT, "")
         )
 
+        # Use template defaults, falling back to generic defaults for custom
+        default_self_use = template.mode_self_use or "Self Use Mode"
+        default_manual = template.mode_manual or "Manual Mode"
+        default_force = template.charge_force or "Force Charge"
+        default_stop = template.charge_stop or "Stop Charge and Discharge"
+
         schema_dict: dict[Any, Any] = {}
         if mode_options:
             schema_dict[vol.Required(CONF_MODE_SELF_USE)] = _select_selector(mode_options)
             schema_dict[vol.Required(CONF_MODE_MANUAL)] = _select_selector(mode_options)
         else:
-            schema_dict[vol.Required(CONF_MODE_SELF_USE, default="Self Use Mode")] = str
-            schema_dict[vol.Required(CONF_MODE_MANUAL, default="Manual Mode")] = str
+            schema_dict[vol.Required(CONF_MODE_SELF_USE, default=default_self_use)] = str
+            schema_dict[vol.Required(CONF_MODE_MANUAL, default=default_manual)] = str
 
         if charge_options:
             schema_dict[vol.Required(CONF_CHARGE_FORCE)] = _select_selector(charge_options)
             schema_dict[vol.Required(CONF_CHARGE_STOP)] = _select_selector(charge_options)
         else:
-            schema_dict[vol.Required(CONF_CHARGE_FORCE, default="Force Charge")] = str
-            schema_dict[vol.Required(CONF_CHARGE_STOP, default="Stop Charge and Discharge")] = str
+            schema_dict[vol.Required(CONF_CHARGE_FORCE, default=default_force)] = str
+            schema_dict[vol.Required(CONF_CHARGE_STOP, default=default_stop)] = str
 
         return self.async_show_form(
             step_id="inverter_values",
@@ -229,7 +294,7 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 7: Battery and charging settings."""
+        """Step 8: Battery and charging settings."""
         if user_input is not None:
             self._data.update(user_input)
             await self.async_set_unique_id(
@@ -241,12 +306,17 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
                 data=self._data,
             )
 
+        template = get_template(
+            self._data.get(CONF_INVERTER_TEMPLATE, DEFAULT_INVERTER_TEMPLATE)
+        )
+        battery_default = template.battery_capacity
+
         return self.async_show_form(
             step_id="settings",
             data_schema=vol.Schema(
                 {
                     vol.Required(
-                        CONF_BATTERY_CAPACITY, default=DEFAULT_BATTERY_CAPACITY
+                        CONF_BATTERY_CAPACITY, default=battery_default
                     ): vol.Coerce(float),
                     vol.Required(
                         CONF_MAX_CHARGE_LEVEL, default=DEFAULT_MAX_CHARGE_LEVEL
@@ -343,6 +413,27 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                         CONF_CURRENCY,
                         default=current.get(CONF_CURRENCY, DEFAULT_CURRENCY),
                     ): str,
+                    # Notifications
+                    vol.Optional(
+                        CONF_NOTIFICATION_SERVICE,
+                        default=current.get(CONF_NOTIFICATION_SERVICE, DEFAULT_NOTIFICATION_SERVICE),
+                    ): str,
+                    vol.Optional(
+                        CONF_NOTIFY_PLANNING,
+                        default=current.get(CONF_NOTIFY_PLANNING, DEFAULT_NOTIFY_PLANNING),
+                    ): bool,
+                    vol.Optional(
+                        CONF_NOTIFY_CHARGING_START,
+                        default=current.get(CONF_NOTIFY_CHARGING_START, DEFAULT_NOTIFY_CHARGING_START),
+                    ): bool,
+                    vol.Optional(
+                        CONF_NOTIFY_CHARGING_COMPLETE,
+                        default=current.get(CONF_NOTIFY_CHARGING_COMPLETE, DEFAULT_NOTIFY_CHARGING_COMPLETE),
+                    ): bool,
+                    vol.Optional(
+                        CONF_NOTIFY_MORNING_SAFETY,
+                        default=current.get(CONF_NOTIFY_MORNING_SAFETY, DEFAULT_NOTIFY_MORNING_SAFETY),
+                    ): bool,
                 }
             ),
         )

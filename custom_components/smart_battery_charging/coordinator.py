@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 if TYPE_CHECKING:
     from .charging_controller import ChargingStateMachine
     from .inverter_controller import InverterController
+    from .notifier import ChargingNotifier
     from .planner import ChargingPlanner
 
 from .const import (
@@ -96,6 +97,7 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.inverter: InverterController | None = None
         self.state_machine: ChargingStateMachine | None = None
         self.planner: ChargingPlanner | None = None
+        self.notifier: ChargingNotifier | None = None
 
     def _opt(self, key: str, default: Any) -> Any:
         """Get a config value, preferring options over data."""

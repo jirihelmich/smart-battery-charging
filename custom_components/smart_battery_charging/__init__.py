@@ -22,6 +22,7 @@ from .charging_controller import ChargingStateMachine
 from .const import CONF_PRICE_SENSOR, DOMAIN, PLATFORMS
 from .coordinator import SmartBatteryCoordinator
 from .inverter_controller import InverterController
+from .notifier import ChargingNotifier
 from .planner import ChargingPlanner
 from .storage import SmartBatteryStore
 
@@ -43,12 +44,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create Phase 2 components
     inverter = InverterController(hass, dict(entry.data))
     planner = ChargingPlanner(coordinator)
-    state_machine = ChargingStateMachine(coordinator, inverter)
+    notifier = ChargingNotifier(hass, coordinator)
+    state_machine = ChargingStateMachine(coordinator, inverter, notifier)
 
     # Wire into coordinator
     coordinator.inverter = inverter
     coordinator.planner = planner
     coordinator.state_machine = state_machine
+    coordinator.notifier = notifier
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
@@ -80,8 +83,10 @@ def _register_event_listeners(
             _LOGGER.debug("Skipping planner — charging disabled")
             return
         try:
+            deficit = planner.compute_energy_deficit()
             schedule = planner.plan_charging()
             await state_machine.async_on_plan(schedule)
+            await notifier.async_notify_plan(schedule, deficit)
             await coordinator.async_request_refresh()
         except Exception:
             _LOGGER.exception("Error running charging planner")
