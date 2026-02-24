@@ -107,11 +107,8 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def battery_capacity(self) -> float:
-        return float(self._opt(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))
-
-    @battery_capacity.setter
-    def battery_capacity(self, value: float) -> None:
-        self._update_option(CONF_BATTERY_CAPACITY, value)
+        """Battery capacity in kWh. Reads from BMS sensor, falls back to manual setting."""
+        return self.inverter_capacity_kwh
 
     @property
     def max_charge_level(self) -> float:
@@ -316,7 +313,7 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         charge_needed = max(0.0, min(energy_deficit, usable_capacity)) if energy_deficit > 0 else 0.0
 
         # Battery calculations
-        capacity_kwh = self.inverter_capacity_kwh
+        capacity_kwh = self.battery_capacity
         soc = self.current_soc
         battery_charge_kwh = round(capacity_kwh * soc / 100, 2)
         min_kwh = capacity_kwh * self.min_soc / 100

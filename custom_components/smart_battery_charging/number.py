@@ -15,13 +15,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    CONF_BATTERY_CAPACITY,
     CONF_FALLBACK_CONSUMPTION,
     CONF_MAX_CHARGE_LEVEL,
     CONF_MAX_CHARGE_POWER,
     CONF_MAX_CHARGE_PRICE,
     CONF_MIN_SOC,
-    DEFAULT_BATTERY_CAPACITY,
     DEFAULT_FALLBACK_CONSUMPTION,
     DEFAULT_MAX_CHARGE_LEVEL,
     DEFAULT_MAX_CHARGE_POWER,
@@ -43,20 +41,6 @@ class SmartBatteryNumberDescription(NumberEntityDescription):
 
 
 NUMBER_DESCRIPTIONS: tuple[SmartBatteryNumberDescription, ...] = (
-    SmartBatteryNumberDescription(
-        key="battery_capacity",
-        translation_key="battery_capacity",
-        icon="mdi:battery",
-        native_min_value=5.0,
-        native_max_value=50.0,
-        native_step=0.5,
-        native_unit_of_measurement="kWh",
-        mode=NumberMode.BOX,
-        config_key=CONF_BATTERY_CAPACITY,
-        default_value=DEFAULT_BATTERY_CAPACITY,
-        getter=lambda c: c.battery_capacity,
-        setter=lambda c, v: setattr(c, "battery_capacity", v),
-    ),
     SmartBatteryNumberDescription(
         key="max_charge_level",
         translation_key="max_charge_level",
