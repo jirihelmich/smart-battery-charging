@@ -1,0 +1,100 @@
+# Charging Status Dashboard Card
+# Copy this into your Lovelace dashboard (Edit Dashboard > Raw config or via UI card editor)
+#
+# Uses only built-in HA card types - no custom cards required.
+
+type: vertical-stack
+cards:
+  # Status header with master switch
+  - type: entities
+    title: Night Charging
+    show_header_toggle: false
+    entities:
+      - entity: sensor.smart_battery_charging_night_charging_status
+        name: Status
+      - entity: switch.smart_battery_charging_enabled
+        name: Automation Enabled
+      - entity: binary_sensor.smart_battery_charging_charging_active
+        name: Charging Now
+
+  # Schedule details - only shown when charging is scheduled
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: sensor.smart_battery_charging_night_charging_status
+        state: Scheduled
+    card:
+      type: entities
+      title: Tonight's Schedule
+      entities:
+        - entity: sensor.smart_battery_charging_night_charging_status
+          type: attribute
+          attribute: schedule_start
+          name: Start Hour
+          icon: mdi:clock-start
+        - entity: sensor.smart_battery_charging_night_charging_status
+          type: attribute
+          attribute: schedule_end
+          name: End Hour
+          icon: mdi:clock-end
+        - entity: sensor.smart_battery_charging_night_charging_status
+          type: attribute
+          attribute: charge_needed
+          name: Required Charge (kWh)
+
+  # Last night's charging summary
+  - type: glance
+    title: Last Night's Charge
+    columns: 3
+    show_state: true
+    show_name: true
+    entities:
+      - entity: sensor.smart_battery_charging_last_night_charge_kwh
+        name: Charged
+      - entity: sensor.smart_battery_charging_last_charge_battery_range
+        name: Battery
+        icon: mdi:battery-arrow-up
+      - entity: sensor.smart_battery_charging_last_charge_time_range
+        name: Time
+        icon: mdi:clock-outline
+      - entity: sensor.smart_battery_charging_last_charge_total_cost
+        name: Cost
+
+  # Battery and forecast overview
+  - type: glance
+    title: Battery & Forecast
+    columns: 3
+    show_state: true
+    entities:
+      - entity: sensor.solax_inverter_battery_capacity
+        name: Battery
+      - entity: sensor.smart_battery_charging_average_daily_consumption
+        name: Avg Use
+      - entity: sensor.smart_battery_charging_tomorrow_solar_forecast
+        name: Solar tmrw
+      - entity: sensor.smart_battery_charging_solar_forecast_error_average
+        name: Fcst Error
+      - entity: sensor.smart_battery_charging_tomorrow_energy_forecast
+        name: Deficit
+      - entity: sensor.smart_battery_charging_electricity_price_status
+        name: Price
+
+  # Current price gauge
+  - type: gauge
+    entity: sensor.current_spot_electricity_price
+    name: Electricity Price
+    unit: Kč/kWh
+    needle: true
+    min: -1
+    max: 8
+    segments:
+      - from: -1
+        color: "#43a047"
+      - from: 1
+        color: "#8bc34a"
+      - from: 2.5
+        color: "#fdd835"
+      - from: 4
+        color: "#fb8c00"
+      - from: 6
+        color: "#e53935"
