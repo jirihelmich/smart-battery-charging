@@ -32,15 +32,16 @@ A Home Assistant custom integration for automated battery charging during cheape
 
 ## Configuration
 
-The integration uses a 7-step config flow:
+The integration uses an 8-step config flow:
 
 1. **Name** — Instance name
-2. **Inverter Entities** — SOC sensor, capacity sensor, mode select, charge command, etc.
-3. **Inverter Values** — Option strings for each mode (auto-populated from entity)
-4. **Price Sensor** — Spot electricity price sensor with hourly attributes
-5. **Solar Forecast** — Today/tomorrow forecast sensors (supports multiple orientations)
-6. **Consumption** — Daily consumption sensor (resets at midnight)
-7. **Settings** — Battery capacity, SOC limits, charge power, price threshold, etc.
+2. **Inverter Template** — Pick your inverter integration (Solax, GoodWe, SolarEdge, Huawei, or Custom) to pre-fill mode strings and entity hints
+3. **Inverter Entities** — SOC sensor, capacity sensor, mode select, charge command, etc.
+4. **Inverter Values** — Option strings for each mode (pre-filled from template, or auto-populated from entity)
+5. **Price Sensor** — Spot electricity price sensor with hourly attributes
+6. **Solar Forecast** — Today/tomorrow forecast sensors (supports multiple orientations)
+7. **Consumption** — Daily consumption sensor (resets at midnight)
+8. **Settings** — Battery capacity, SOC limits, charge power, price threshold, etc.
 
 All settings from step 7 can be changed at runtime via the options flow or directly through the number entities.
 
@@ -107,9 +108,9 @@ python3 -m pytest tests/ -v
 
 ## Phases
 
-- **Phase 1** (current): Read-only sensors — computes and displays values, no inverter control
-- **Phase 2**: Charging control — state machine, planner, inverter abstraction
-- **Phase 3**: Notifications, diagnostics, HACS validation
+- **Phase 1** ✅: Read-only sensors — computes and displays values, no inverter control
+- **Phase 2** ✅: Charging control — state machine, planner, inverter abstraction
+- **Phase 3** ✅ (current): Notifications, diagnostics, inverter templates, HACS validation, CI
 - **Phase 4**: Community features — multiple price formats, non-contiguous hours, multi-battery
 
 ## License
