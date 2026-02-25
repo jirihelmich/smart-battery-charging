@@ -35,6 +35,7 @@ sys.path.insert(0, str(_COMPONENTS_DIR))
 
 from smart_battery_charging.consumption_tracker import ConsumptionTracker
 from smart_battery_charging.forecast_corrector import ForecastCorrector
+from smart_battery_charging.models import EnergyDeficit, OvernightNeed
 from smart_battery_charging.planner import ChargingPlanner
 from smart_battery_charging.price_analyzer import PriceAnalyzer, PriceSlot, PriceWindow
 
@@ -50,6 +51,11 @@ def _make_coordinator(
     consumption_history=None,
     forecast_error_history=None,
     price_attributes=None,
+    current_soc=50.0,
+    solar_forecast_tomorrow_hourly=None,
+    sunrise_hour_tomorrow=6.5,
+    solar_forecast_today=10.0,
+    actual_solar_today=5.0,
 ):
     """Create a mock coordinator with controlled values."""
     coord = MagicMock()
@@ -60,6 +66,16 @@ def _make_coordinator(
     coord.max_charge_power = max_charge_power
     coord.max_charge_price = max_charge_price
     coord.solar_forecast_tomorrow = solar_forecast_tomorrow
+    coord.current_soc = current_soc
+    coord.solar_forecast_today = solar_forecast_today
+    coord.actual_solar_today = actual_solar_today
+    coord._last_overnight = None
+
+    # Overnight-related properties
+    type(coord).solar_forecast_tomorrow_hourly = PropertyMock(
+        return_value=solar_forecast_tomorrow_hourly or {}
+    )
+    type(coord).sunrise_hour_tomorrow = PropertyMock(return_value=sunrise_hour_tomorrow)
 
     # Real sub-components for correct logic
     coord.consumption_tracker = ConsumptionTracker(window_days=7, fallback_kwh=20.0)
@@ -245,10 +261,29 @@ class TestPlanCharging:
         assert schedule.avg_price <= coord.max_charge_price
         assert schedule.window_hours >= 1
 
-    def test_returns_none_when_solar_covers(self):
+    @patch("smart_battery_charging.planner.datetime")
+    def test_returns_none_when_solar_covers(self, mock_dt):
+        # Fix time to 20:00 — only 2h of pre-window drain
+        now = datetime(2026, 2, 25, 20, 0, 0)
+        mock_dt.now.return_value = now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        today = now.strftime("%Y-%m-%d")
+        prices = {
+            f"{today}T22:00:00+01:00": 1.8,
+            f"{today}T23:00:00+01:00": 1.5,
+            f"{tomorrow}T00:00:00+01:00": 1.2,
+            f"{tomorrow}T01:00:00+01:00": 1.0,
+            f"{tomorrow}T02:00:00+01:00": 1.3,
+            f"{tomorrow}T03:00:00+01:00": 1.6,
+            f"{tomorrow}T04:00:00+01:00": 2.0,
+            f"{tomorrow}T05:00:00+01:00": 2.5,
+        }
         coord = _make_coordinator(
             solar_forecast_tomorrow=25.0,
             consumption_history=[16.0, 17.0, 16.5],
+            current_soc=85.0,  # high SOC so battery covers overnight too
+            price_attributes=prices,
         )
         planner = ChargingPlanner(coord)
         schedule = planner.plan_charging()
@@ -329,3 +364,170 @@ class TestPlanCharging:
 
         assert schedule is not None
         assert schedule.created_at is not None
+
+    def test_overnight_triggers_charging_when_daily_deficit_zero(self):
+        """Solar > consumption but low battery can't bridge the night."""
+        coord = _make_coordinator(
+            solar_forecast_tomorrow=25.0,  # plenty of solar
+            consumption_history=[16.0, 17.0, 16.5],
+            current_soc=30.0,  # low battery — ~1.5 kWh usable
+            solar_forecast_today=10.0,
+            actual_solar_today=10.0,  # no remaining solar today
+        )
+        planner = ChargingPlanner(coord)
+        schedule = planner.plan_charging()
+
+        # Daily deficit is 0 but overnight survival triggers charging
+        assert schedule is not None
+        assert schedule.required_kwh > 0
+        assert planner.last_overnight_need is not None
+        assert planner.last_overnight_need.charge_needed > 0
+
+    def test_overnight_increases_charge_above_daily_deficit(self):
+        """Overnight need exceeds daily deficit → uses overnight value."""
+        coord = _make_coordinator(
+            solar_forecast_tomorrow=14.0,  # small deficit
+            consumption_history=[16.0, 17.0, 16.5],
+            current_soc=30.0,  # low battery
+            solar_forecast_today=10.0,
+            actual_solar_today=10.0,
+        )
+        planner = ChargingPlanner(coord)
+        schedule = planner.plan_charging()
+
+        assert schedule is not None
+        overnight = planner.last_overnight_need
+        assert overnight is not None
+        # If overnight need > daily deficit, required_kwh should reflect that
+        if overnight.charge_needed > 2.5:
+            assert schedule.required_kwh >= overnight.charge_needed
+
+
+class TestComputeOvernightNeed:
+    """Test overnight survival calculation."""
+
+    def test_overnight_shortfall_low_battery(self):
+        """Battery at 30% cannot cover overnight consumption."""
+        coord = _make_coordinator(
+            battery_capacity=15.0,
+            min_soc=20.0,
+            max_charge_level=90.0,
+            current_soc=30.0,  # only 1.5 kWh usable (30-20=10% of 15)
+            consumption_history=[16.0, 17.0, 16.5],  # ~16.5 avg = 0.6875/h
+            sunrise_hour_tomorrow=6.5,
+            solar_forecast_today=10.0,
+            actual_solar_today=10.0,  # no remaining solar
+        )
+        planner = ChargingPlanner(coord)
+        overnight = planner.compute_overnight_need()
+
+        # ~8.5 dark hours (22:00 to 06:30+2h=08:30), ~5.8 kWh consumed
+        # Battery usable ~1.5 kWh → shortfall > 0
+        assert overnight.charge_needed > 0
+        assert overnight.dark_hours > 0
+        assert overnight.source in ("sun_entity", "fallback")
+
+    @patch("smart_battery_charging.planner.datetime")
+    def test_overnight_no_shortfall_full_battery(self, mock_dt):
+        """Battery at 85% easily covers overnight (planning at 20:00)."""
+        now = datetime(2026, 2, 25, 20, 0, 0)
+        mock_dt.now.return_value = now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        coord = _make_coordinator(
+            battery_capacity=15.0,
+            min_soc=20.0,
+            max_charge_level=90.0,
+            current_soc=85.0,  # 9.75 kWh usable
+            consumption_history=[16.0, 17.0, 16.5],
+            sunrise_hour_tomorrow=6.5,
+            solar_forecast_today=10.0,
+            actual_solar_today=10.0,
+        )
+        planner = ChargingPlanner(coord)
+        overnight = planner.compute_overnight_need()
+
+        # At 20:00 with 85% SOC: 9.75 kWh usable
+        # 2h pre-window drain: 2 * 0.6875 = 1.375, no remaining solar → drain = 1.375
+        # Battery at start: 9.75 - 1.375 = 8.375
+        # ~10.5h dark (22:00 to 08:30), consumption ~7.22 kWh
+        # 8.375 > 7.22 → no shortfall
+        assert overnight.charge_needed == 0
+
+    def test_overnight_with_hourly_solar_data(self):
+        """Hour-by-hour simulation with forecast_solar data."""
+        hourly = {
+            7: 0.3,   # sunrise ramp
+            8: 1.0,   # not enough (consumption ~0.69)
+            9: 2.0,   # covers consumption
+            10: 3.0,
+        }
+        coord = _make_coordinator(
+            battery_capacity=15.0,
+            min_soc=20.0,
+            max_charge_level=90.0,
+            current_soc=35.0,
+            consumption_history=[16.0, 17.0, 16.5],
+            solar_forecast_tomorrow_hourly=hourly,
+            solar_forecast_today=10.0,
+            actual_solar_today=10.0,
+        )
+        planner = ChargingPlanner(coord)
+        overnight = planner.compute_overnight_need()
+
+        assert overnight.source == "forecast_solar"
+        # Solar covers consumption starting at hour 8 (1.0 > 0.6875)
+        assert overnight.solar_start_hour == 8.0
+        assert overnight.dark_hours > 0
+
+    def test_overnight_fallback_no_sun_entity(self):
+        """When sun.sun is not available, uses fallback."""
+        coord = _make_coordinator(
+            current_soc=40.0,
+            consumption_history=[16.0],
+            sunrise_hour_tomorrow=None,  # sun entity unavailable
+            solar_forecast_today=5.0,
+            actual_solar_today=5.0,
+        )
+        planner = ChargingPlanner(coord)
+        overnight = planner.compute_overnight_need()
+
+        # Fallback: window_end + 3 = 6 + 3 = 9
+        assert overnight.source == "fallback"
+        assert overnight.solar_start_hour == 9.0
+
+    def test_overnight_clamped_to_usable_capacity(self):
+        """Charge needed cannot exceed usable capacity."""
+        coord = _make_coordinator(
+            battery_capacity=15.0,
+            min_soc=20.0,
+            max_charge_level=90.0,
+            current_soc=20.0,  # exactly at min SOC → 0 usable
+            consumption_history=[16.0, 17.0],
+            sunrise_hour_tomorrow=8.0,  # late sunrise → long dark period
+            solar_forecast_today=10.0,
+            actual_solar_today=10.0,
+        )
+        planner = ChargingPlanner(coord)
+        overnight = planner.compute_overnight_need()
+
+        usable_capacity = 15.0 * (90.0 - 20.0) / 100  # 10.5
+        assert overnight.charge_needed <= usable_capacity
+
+    def test_overnight_accounts_for_pre_window_discharge(self):
+        """Planning during daytime accounts for evening battery drain."""
+        # Simulate planning at ~14:00 — 8 hours until 22:00 window start
+        coord = _make_coordinator(
+            battery_capacity=15.0,
+            min_soc=20.0,
+            max_charge_level=90.0,
+            current_soc=60.0,  # 6 kWh usable now
+            consumption_history=[16.0, 17.0, 16.5],  # 0.6875/h
+            sunrise_hour_tomorrow=6.5,
+            solar_forecast_today=10.0,
+            actual_solar_today=5.0,  # 5 kWh remaining solar today
+        )
+        planner = ChargingPlanner(coord)
+        overnight = planner.compute_overnight_need()
+
+        # Battery at window start should be less than current usable
+        assert overnight.battery_at_window_start < 6.0

@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -50,7 +51,7 @@ from .const import (
 )
 from .consumption_tracker import ConsumptionTracker
 from .forecast_corrector import ForecastCorrector
-from .models import ChargingSchedule, ChargingSession, ChargingState
+from .models import ChargingSchedule, ChargingSession, ChargingState, OvernightNeed
 from .price_analyzer import PriceAnalyzer
 from .storage import SmartBatteryStore
 
@@ -92,6 +93,7 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.enabled: bool = True
         self.charging_state: ChargingState = ChargingState.IDLE
         self.current_schedule: ChargingSchedule | None = None
+        self._last_overnight: OvernightNeed | None = None
 
         # Phase 2 components (set from __init__.py after construction)
         self.inverter: InverterController | None = None
@@ -238,6 +240,65 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def daily_consumption_current(self) -> float:
         """Today's consumption so far."""
         return self._get_state_float(self.entry.data.get(CONF_CONSUMPTION_SENSOR, ""))
+
+    @property
+    def solar_forecast_tomorrow_hourly(self) -> dict[int, float]:
+        """Hourly solar forecast for tomorrow from the forecast_solar integration.
+
+        Returns dict mapping hour (0-23) to kWh production for that hour.
+        Combines all forecast_solar config entries.
+        """
+        result: dict[int, float] = {}
+        tomorrow = (datetime.now() + timedelta(days=1)).date()
+
+        try:
+            entries = self.hass.config_entries.async_entries("forecast_solar")
+        except Exception:
+            return result
+
+        for entry in entries:
+            runtime_data = getattr(entry, "runtime_data", None)
+            if runtime_data is None:
+                continue
+            # forecast_solar stores an Estimate object on runtime_data
+            estimate = getattr(runtime_data, "data", runtime_data)
+            wh_period = getattr(estimate, "wh_period", None)
+            if not isinstance(wh_period, dict):
+                continue
+            for dt_key, wh_value in wh_period.items():
+                try:
+                    if hasattr(dt_key, "date") and dt_key.date() == tomorrow:
+                        hour = dt_key.hour
+                        kwh = float(wh_value) / 1000.0
+                        result[hour] = result.get(hour, 0.0) + kwh
+                except (ValueError, TypeError, AttributeError):
+                    continue
+
+        return result
+
+    @property
+    def sunrise_hour_tomorrow(self) -> float | None:
+        """Hour of sunrise tomorrow as a float (e.g., 6.5 = 06:30).
+
+        Reads from the sun.sun entity's next_rising attribute.
+        Returns None if sun.sun is unavailable.
+        """
+        state = self.hass.states.get("sun.sun")
+        if state is None:
+            return None
+        next_rising = state.attributes.get("next_rising")
+        if next_rising is None:
+            return None
+        try:
+            from homeassistant.util.dt import as_local, parse_datetime
+
+            dt = parse_datetime(str(next_rising))
+            if dt is None:
+                return None
+            local_dt = as_local(dt)
+            return round(local_dt.hour + local_dt.minute / 60, 2)
+        except (ValueError, TypeError):
+            return None
 
     # --- Daily recorders ---
 
@@ -391,6 +452,11 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "charging_active": self.charging_state == ChargingState.CHARGING,
             "charging_recommended": charging_recommended,
             "schedule": self.current_schedule,
+            # Overnight survival
+            "overnight_dark_hours": self._last_overnight.dark_hours if self._last_overnight else None,
+            "overnight_consumption_estimate": self._last_overnight.overnight_consumption if self._last_overnight else None,
+            "overnight_battery_at_window_start": self._last_overnight.battery_at_window_start if self._last_overnight else None,
+            "overnight_charge_needed": self._last_overnight.charge_needed if self._last_overnight else None,
             # Last session
             "last_session": last_session,
             "last_night_charge_kwh": last_kwh,

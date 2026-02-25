@@ -140,6 +140,9 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
             "schedule_end": d["schedule"].end_hour if d.get("schedule") else None,
             "charge_needed": d["charge_needed"],
             "battery_soc": d["battery_soc"],
+            "overnight_dark_hours": d.get("overnight_dark_hours"),
+            "overnight_consumption": d.get("overnight_consumption_estimate"),
+            "overnight_charge_needed": d.get("overnight_charge_needed"),
         },
     ),
     SmartBatterySensorDescription(

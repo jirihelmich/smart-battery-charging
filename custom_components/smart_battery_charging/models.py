@@ -79,3 +79,19 @@ class EnergyDeficit:
     deficit: float
     charge_needed: float
     usable_capacity: float
+
+
+@dataclass
+class OvernightNeed:
+    """Result of the overnight survival calculation.
+
+    Determines whether the battery can bridge the gap from window_start
+    (e.g. 22:00) until solar production meaningfully covers consumption.
+    """
+
+    dark_hours: float  # Hours from window_start to solar coverage
+    overnight_consumption: float  # kWh consumed during dark hours
+    battery_at_window_start: float  # Estimated usable kWh at window start
+    charge_needed: float  # max(0, overnight_consumption - battery), clamped
+    solar_start_hour: float  # Hour when PV covers consumption
+    source: str  # "forecast_solar" or "sun_entity" or "fallback"

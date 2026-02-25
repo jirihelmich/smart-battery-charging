@@ -85,8 +85,9 @@ def _register_event_listeners(
         try:
             deficit = planner.compute_energy_deficit()
             schedule = planner.plan_charging()
+            overnight = planner.last_overnight_need
             await state_machine.async_on_plan(schedule)
-            await notifier.async_notify_plan(schedule, deficit)
+            await notifier.async_notify_plan(schedule, deficit, overnight)
             await coordinator.async_request_refresh()
         except Exception:
             _LOGGER.exception("Error running charging planner")

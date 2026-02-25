@@ -23,7 +23,7 @@ from .const import (
     DEFAULT_NOTIFY_MORNING_SAFETY,
     DEFAULT_NOTIFY_PLANNING,
 )
-from .models import ChargingSchedule, ChargingSession, EnergyDeficit
+from .models import ChargingSchedule, ChargingSession, EnergyDeficit, OvernightNeed
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -72,25 +72,32 @@ class ChargingNotifier:
             _LOGGER.exception("Failed to send notification via notify.%s", service)
 
     def _compute_plan_hash(
-        self, schedule: ChargingSchedule | None, deficit: EnergyDeficit
+        self,
+        schedule: ChargingSchedule | None,
+        deficit: EnergyDeficit,
+        overnight: OvernightNeed | None = None,
     ) -> str:
         """Compute a hash of the plan for deduplication."""
+        overnight_key = f":{overnight.charge_needed:.1f}" if overnight else ""
         if schedule is None:
-            key = f"no_schedule:{deficit.charge_needed:.1f}:{deficit.deficit:.1f}"
+            key = f"no_schedule:{deficit.charge_needed:.1f}:{deficit.deficit:.1f}{overnight_key}"
         else:
             key = (
                 f"{schedule.start_hour}:{schedule.end_hour}:"
                 f"{schedule.required_kwh:.1f}:{schedule.target_soc:.0f}:"
-                f"{schedule.avg_price:.2f}"
+                f"{schedule.avg_price:.2f}{overnight_key}"
             )
         return hashlib.md5(key.encode()).hexdigest()[:12]
 
     def _is_duplicate_plan(
-        self, schedule: ChargingSchedule | None, deficit: EnergyDeficit
+        self,
+        schedule: ChargingSchedule | None,
+        deficit: EnergyDeficit,
+        overnight: OvernightNeed | None = None,
     ) -> bool:
         """Check if this plan is the same as the last one sent today."""
         today = date.today()
-        plan_hash = self._compute_plan_hash(schedule, deficit)
+        plan_hash = self._compute_plan_hash(schedule, deficit, overnight)
 
         if self._last_plan_date == today and self._last_plan_hash == plan_hash:
             return True
@@ -103,19 +110,29 @@ class ChargingNotifier:
         self,
         schedule: ChargingSchedule | None,
         deficit: EnergyDeficit,
+        overnight: OvernightNeed | None = None,
     ) -> None:
         """Send planning notification (3 variants: scheduled, not scheduled, not needed)."""
         if not self._is_enabled(CONF_NOTIFY_PLANNING, DEFAULT_NOTIFY_PLANNING):
             return
-        if self._is_duplicate_plan(schedule, deficit):
+        if self._is_duplicate_plan(schedule, deficit, overnight):
             _LOGGER.debug("Skipping duplicate plan notification")
             return
 
         currency = self._coordinator.currency
         soc = self._coordinator.current_soc
 
-        if deficit.charge_needed <= 0:
-            # Solar covers consumption
+        # Overnight context line (appended when overnight triggers charging)
+        overnight_info = ""
+        if overnight and overnight.charge_needed > deficit.charge_needed:
+            overnight_info = (
+                f"\n\n🌙 Overnight survival: {overnight.charge_needed:.1f} kWh needed\n"
+                f"Dark hours: {overnight.dark_hours:.0f}h, "
+                f"Battery at 22:00: ~{overnight.battery_at_window_start:.1f} kWh"
+            )
+
+        if deficit.charge_needed <= 0 and (overnight is None or overnight.charge_needed <= 0):
+            # Solar covers consumption and battery covers overnight
             title = "☀️ No Charging Needed"
             message = (
                 f"Solar forecast covers tomorrow's consumption.\n\n"
@@ -135,18 +152,21 @@ class ChargingNotifier:
                 f"Solar (raw): {deficit.solar_raw:.1f} kWh\n"
                 f"Solar (adjusted): {deficit.solar_adjusted:.1f} kWh\n"
                 f"Consumption: {deficit.consumption:.1f} kWh"
+                f"{overnight_info}"
             )
         else:
             # Deficit exists but no schedule (price too high or no prices)
+            effective = max(deficit.charge_needed, overnight.charge_needed) if overnight else deficit.charge_needed
             title = "⏸️ Charging Not Scheduled"
             max_price = self._coordinator.max_charge_price
             message = (
-                f"Charging needed ({deficit.charge_needed:.1f} kWh) but not scheduled.\n"
+                f"Charging needed ({effective:.1f} kWh) but not scheduled.\n"
                 f"SOC: {soc:.0f}%\n"
                 f"Price threshold: {max_price:.2f} {currency}\n\n"
                 f"Solar (raw): {deficit.solar_raw:.1f} kWh\n"
                 f"Solar (adjusted): {deficit.solar_adjusted:.1f} kWh\n"
                 f"Consumption: {deficit.consumption:.1f} kWh"
+                f"{overnight_info}"
             )
 
         await self._async_send(title, message)
