@@ -7,12 +7,16 @@ Delegates all Modbus writes to InverterController.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import TYPE_CHECKING
 
+from homeassistant.util import dt as dt_util
+
+from .const import CHARGE_HISTORY_DAYS, STALL_ABORT_TICKS, STALL_RETRY_TICKS, START_FAILURE_MAX_RETRIES
 from .models import ChargingSchedule, ChargingSession, ChargingState
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from .coordinator import SmartBatteryCoordinator
     from .inverter_controller import InverterController
     from .notifier import ChargingNotifier
@@ -33,27 +37,44 @@ class ChargingStateMachine:
         self._inverter = inverter
         self._notifier = notifier
         self._session: ChargingSession | None = None
+        # Stall detection (Fix 3)
+        self._stall_start_soc: float | None = None
+        self._stall_tick_count: int = 0
+        # Start failure tracking (C3)
+        self._start_fail_count: int = 0
 
     @property
     def state(self) -> ChargingState:
         return self._coordinator.charging_state
 
-    @state.setter
-    def state(self, value: ChargingState) -> None:
+    async def _set_state(self, value: ChargingState) -> None:
+        """Set state on coordinator and persist to store."""
         _LOGGER.info("State transition: %s → %s", self._coordinator.charging_state.value, value.value)
         self._coordinator.charging_state = value
+        await self._coordinator.store.async_set_charging_state(value.value)
 
     @property
     def schedule(self) -> ChargingSchedule | None:
         return self._coordinator.current_schedule
 
-    @schedule.setter
-    def schedule(self, value: ChargingSchedule | None) -> None:
+    async def _set_schedule(self, value: ChargingSchedule | None) -> None:
+        """Set schedule on coordinator and persist to store."""
         self._coordinator.current_schedule = value
+        if value is None:
+            await self._coordinator.store.async_set_current_schedule(None)
+        else:
+            await self._coordinator.store.async_set_current_schedule({
+                "start_hour": value.start_hour,
+                "end_hour": value.end_hour,
+                "window_hours": value.window_hours,
+                "avg_price": value.avg_price,
+                "required_kwh": value.required_kwh,
+                "target_soc": value.target_soc,
+            })
 
     def _now(self) -> datetime:
         """Get current time (override in tests)."""
-        return datetime.now()
+        return dt_util.now()
 
     def _is_in_window(self, schedule: ChargingSchedule) -> bool:
         """Check if current time is within the charging window."""
@@ -79,7 +100,7 @@ class ChargingStateMachine:
             if self.state in (ChargingState.IDLE, ChargingState.COMPLETE):
                 self._session = ChargingSession(result="No charging needed")
                 await self._save_session()
-                self.state = ChargingState.IDLE
+                await self._set_state(ChargingState.IDLE)
             _LOGGER.info("No charging scheduled")
             return
 
@@ -88,9 +109,10 @@ class ChargingStateMachine:
             ChargingState.COMPLETE,
             ChargingState.SCHEDULED,
         ):
-            self.schedule = schedule
+            await self._set_schedule(schedule)
             self._session = ChargingSession(avg_price=schedule.avg_price)
-            self.state = ChargingState.SCHEDULED
+            self._start_fail_count = 0
+            await self._set_state(ChargingState.SCHEDULED)
             _LOGGER.info(
                 "Charging scheduled: %02d:00-%02d:00, target %.0f%%",
                 schedule.start_hour,
@@ -119,7 +141,7 @@ class ChargingStateMachine:
         """Handle tick while in SCHEDULED state."""
         schedule = self.schedule
         if schedule is None:
-            self.state = ChargingState.IDLE
+            await self._set_state(ChargingState.IDLE)
             return
 
         if not self._is_in_window(schedule):
@@ -138,18 +160,50 @@ class ChargingStateMachine:
                 self._session.start_time = now_str
                 self._session.end_time = now_str
             await self._save_session()
-            self.state = ChargingState.COMPLETE
+            await self._set_state(ChargingState.COMPLETE)
             return
 
         # Start charging
         _LOGGER.info("Starting charge: SOC %.0f%%, target %.0f%%", soc, schedule.target_soc)
-        await self._inverter.async_start_charging(schedule.target_soc)
+        ok = await self._inverter.async_start_charging(schedule.target_soc)
+
+        if not ok:
+            # C3: Don't transition to CHARGING when start fails
+            self._start_fail_count += 1
+            _LOGGER.warning(
+                "Inverter did not confirm charge start (attempt %d/%d)",
+                self._start_fail_count, START_FAILURE_MAX_RETRIES,
+            )
+            if self._start_fail_count >= START_FAILURE_MAX_RETRIES:
+                _LOGGER.error(
+                    "Inverter start failed %d times, aborting schedule",
+                    self._start_fail_count,
+                )
+                if self._session:
+                    self._session.start_soc = soc
+                    self._session.end_soc = soc
+                    self._session.result = "Inverter command failed"
+                    now_str = self._now().isoformat()
+                    self._session.start_time = now_str
+                    self._session.end_time = now_str
+                await self._save_session()
+                await self._set_state(ChargingState.IDLE)
+                if self._notifier:
+                    await self._notifier.async_notify_charging_stalled(
+                        soc, schedule.target_soc, 0
+                    )
+            return  # Stay SCHEDULED, retry on next tick
 
         if self._session:
             self._session.start_soc = soc
             self._session.start_time = self._now().isoformat()
 
-        self.state = ChargingState.CHARGING
+        # Reset stall counters and start failure count
+        self._stall_start_soc = soc
+        self._stall_tick_count = 0
+        self._start_fail_count = 0
+
+        await self._set_state(ChargingState.CHARGING)
 
         if self._notifier:
             await self._notifier.async_notify_charging_started(
@@ -162,7 +216,7 @@ class ChargingStateMachine:
         if schedule is None:
             # Shouldn't happen, but recover gracefully
             await self._inverter.async_stop_charging(self._coordinator.min_soc)
-            self.state = ChargingState.IDLE
+            await self._set_state(ChargingState.IDLE)
             return
 
         soc = self._coordinator.current_soc
@@ -176,7 +230,7 @@ class ChargingStateMachine:
                 self._session.end_time = self._now().isoformat()
                 self._session.result = "Target reached"
             await self._save_session()
-            self.state = ChargingState.COMPLETE
+            await self._set_state(ChargingState.COMPLETE)
             if self._notifier and self._session:
                 await self._notifier.async_notify_charging_complete(
                     self._session, schedule.target_soc
@@ -192,14 +246,47 @@ class ChargingStateMachine:
                 self._session.end_time = self._now().isoformat()
                 self._session.result = "Window ended"
             await self._save_session()
-            self.state = ChargingState.COMPLETE
+            await self._set_state(ChargingState.COMPLETE)
             if self._notifier and self._session:
                 await self._notifier.async_notify_charging_complete(
                     self._session, schedule.target_soc
                 )
             return
 
-        # Still charging, nothing to do
+        # Stall detection: check if SOC has moved
+        if self._stall_start_soc is not None and soc == self._stall_start_soc:
+            self._stall_tick_count += 1
+
+            if self._stall_tick_count == STALL_RETRY_TICKS:
+                _LOGGER.warning(
+                    "Charging stalled at %.0f%% for %d ticks, retrying charge command",
+                    soc, self._stall_tick_count,
+                )
+                await self._inverter.async_start_charging(schedule.target_soc)
+
+            elif self._stall_tick_count >= STALL_ABORT_TICKS:
+                minutes_stalled = self._stall_tick_count * 2
+                _LOGGER.error(
+                    "Charging stalled at %.0f%% for %d min, aborting",
+                    soc, minutes_stalled,
+                )
+                await self._inverter.async_stop_charging(self._coordinator.min_soc)
+                if self._session:
+                    self._session.end_soc = soc
+                    self._session.end_time = self._now().isoformat()
+                    self._session.result = "Charging stalled"
+                await self._save_session()
+                await self._set_state(ChargingState.COMPLETE)
+                if self._notifier:
+                    await self._notifier.async_notify_charging_stalled(
+                        soc, schedule.target_soc, minutes_stalled
+                    )
+                return
+        else:
+            # SOC changed — reset stall tracking
+            self._stall_start_soc = soc
+            self._stall_tick_count = 0
+
         _LOGGER.debug("Charging in progress: SOC %.0f%%, target %.0f%%", soc, schedule.target_soc)
 
     async def async_on_morning_safety(self) -> None:
@@ -220,18 +307,18 @@ class ChargingStateMachine:
                 self._session.end_time = self._now().isoformat()
                 self._session.result = "Morning safety stop"
             await self._save_session()
-            self.state = ChargingState.IDLE
+            await self._set_state(ChargingState.IDLE)
             if self._notifier:
                 await self._notifier.async_notify_morning_safety(soc)
         elif self._inverter.is_manual_mode(current_mode):
             _LOGGER.warning("Morning safety: inverter in Manual Mode, restoring Self Use")
             await self._inverter.async_stop_charging(self._coordinator.min_soc)
-            self.state = ChargingState.IDLE
+            await self._set_state(ChargingState.IDLE)
         else:
             _LOGGER.debug("Morning safety: all clear, inverter in %s", current_mode)
 
         # Reset schedule for new day
-        self.schedule = None
+        await self._set_schedule(None)
 
     async def async_on_disable(self) -> None:
         """Handle master switch being turned off.
@@ -248,16 +335,23 @@ class ChargingStateMachine:
                 self._session.result = "Disabled"
             await self._save_session()
 
-        self.schedule = None
-        self.state = ChargingState.DISABLED
+        await self._set_schedule(None)
+        await self._set_state(ChargingState.DISABLED)
 
     async def async_on_enable(self) -> None:
         """Handle master switch being turned on."""
         if self.state == ChargingState.DISABLED:
-            self.state = ChargingState.IDLE
+            await self._set_state(ChargingState.IDLE)
             _LOGGER.info("Charging re-enabled")
 
     async def _save_session(self) -> None:
-        """Persist the current session to storage."""
+        """Persist the current session to storage and record charge history (M1)."""
         if self._session:
             await self._coordinator.store.async_set_last_session(self._session)
+            # M1: Append kWh to charge_history if there was actual charging
+            kwh = self._session.kwh_charged(self._coordinator.battery_capacity)
+            if kwh > 0:
+                history = list(self._coordinator.store.charge_history)
+                history.append(kwh)
+                history = history[-CHARGE_HISTORY_DAYS:]
+                await self._coordinator.store.async_set_charge_history(history)

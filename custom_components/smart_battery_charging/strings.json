@@ -25,7 +25,11 @@
           "inverter_mode_select": "Inverter mode select entity",
           "inverter_charge_command_select": "Charge command select entity",
           "inverter_charge_soc_limit": "Charge SOC limit number entity",
-          "inverter_discharge_min_soc": "Discharge min SOC number entity (optional)"
+          "inverter_discharge_min_soc": "Discharge min SOC number entity (optional)",
+          "inverter_working_mode_number": "Working mode number entity (Modbus register)",
+          "inverter_battery_power_number": "Battery power number entity (Modbus register)",
+          "inverter_ac_lower_limit_number": "AC lower limit number entity (Modbus register)",
+          "inverter_battery_dod_number": "Battery DOD number entity (optional)"
         }
       },
       "inverter_values": {
@@ -35,7 +39,9 @@
           "mode_self_use": "Self Use mode option",
           "mode_manual": "Manual mode option",
           "charge_force": "Force Charge command option",
-          "charge_stop": "Stop Charge command option"
+          "charge_stop": "Stop Charge command option",
+          "ems_charge_mode_value": "EMS charge mode register value",
+          "ems_normal_mode_value": "EMS normal mode register value"
         }
       },
       "price": {
@@ -76,6 +82,9 @@
           "currency": "Price unit (e.g. Kč/kWh)"
         }
       }
+    },
+    "error": {
+      "min_soc_exceeds_max": "Min SOC must be less than Max Charge Level"
     }
   },
   "options": {
@@ -97,9 +106,14 @@
           "notify_planning": "Notify: Charging plan",
           "notify_charging_start": "Notify: Charging started",
           "notify_charging_complete": "Notify: Charging complete",
-          "notify_morning_safety": "Notify: Morning safety"
+          "notify_morning_safety": "Notify: Morning safety",
+          "notify_charging_stalled": "Notify: Charging stalled",
+          "notify_sensor_unavailable": "Notify: Sensor unavailable"
         }
       }
+    },
+    "error": {
+      "min_soc_exceeds_max": "Min SOC must be less than Max Charge Level"
     }
   },
   "entity": {

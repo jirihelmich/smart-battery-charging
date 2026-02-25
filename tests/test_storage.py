@@ -64,3 +64,33 @@ class TestChargingSession:
         assert session.end_time == ""
         assert session.avg_price == 0.0
         assert session.result == ""
+
+    def test_no_charged_kwh_property(self):
+        """M5/L3: charged_kwh property has been removed (was always 0.0)."""
+        session = ChargingSession(start_soc=20.0, end_soc=80.0)
+        assert not hasattr(session, "charged_kwh") or not isinstance(
+            getattr(type(session), "charged_kwh", None), property
+        )
+
+
+class TestDefaultData:
+    """Test storage default data includes new fields."""
+
+    def test_default_data_has_all_fields(self):
+        expected_keys = {
+            "consumption_history", "charge_history", "forecast_error_history",
+            "last_session", "enabled", "charging_state", "current_schedule",
+        }
+        data = {
+            "consumption_history": [],
+            "charge_history": [],
+            "forecast_error_history": [],
+            "last_session": None,
+            "enabled": True,
+            "charging_state": "idle",
+            "current_schedule": None,
+        }
+        assert set(data.keys()) == expected_keys
+        assert data["enabled"] is True
+        assert data["charging_state"] == "idle"
+        assert data["current_schedule"] is None

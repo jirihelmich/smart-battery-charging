@@ -28,6 +28,9 @@ def _default_data() -> dict[str, Any]:
         "charge_history": [],
         "forecast_error_history": [],
         "last_session": None,
+        "enabled": True,
+        "charging_state": "idle",
+        "current_schedule": None,
     }
 
 
@@ -118,6 +121,42 @@ class SmartBatteryStore:
             "avg_price": session.avg_price,
             "result": session.result,
         }
+        await self.async_save()
+
+    # --- Enabled State ---
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether charging is enabled."""
+        return bool(self._data.get("enabled", True))
+
+    async def async_set_enabled(self, value: bool) -> None:
+        """Set the enabled state and persist."""
+        self._data["enabled"] = value
+        await self.async_save()
+
+    # --- Charging State (C1) ---
+
+    @property
+    def charging_state(self) -> str:
+        """Return the persisted charging state string."""
+        return str(self._data.get("charging_state", "idle"))
+
+    async def async_set_charging_state(self, state: str) -> None:
+        """Set the charging state and persist."""
+        self._data["charging_state"] = state
+        await self.async_save()
+
+    # --- Current Schedule (C1) ---
+
+    @property
+    def current_schedule(self) -> dict[str, Any] | None:
+        """Return the persisted schedule dict (or None)."""
+        return self._data.get("current_schedule")
+
+    async def async_set_current_schedule(self, schedule_dict: dict[str, Any] | None) -> None:
+        """Set the current schedule dict and persist."""
+        self._data["current_schedule"] = schedule_dict
         await self.async_save()
 
     async def async_remove(self) -> None:

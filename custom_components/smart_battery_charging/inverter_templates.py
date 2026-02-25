@@ -12,12 +12,16 @@ class InverterTemplate:
     id: str
     label: str
     description: str
-    mode_self_use: str
-    mode_manual: str
-    charge_force: str
-    charge_stop: str
-    battery_capacity: float
+    control_type: str = "select"  # "select" or "ems_power"
+    mode_self_use: str = ""
+    mode_manual: str = ""
+    charge_force: str = ""
+    charge_stop: str = ""
+    battery_capacity: float = 15.0
     entity_hints: dict[str, str] = field(default_factory=dict)
+    # EMS power control fields (for control_type="ems_power")
+    ems_charge_mode_value: int = 0
+    ems_normal_mode_value: int = 0
 
 
 INVERTER_TEMPLATES: dict[str, InverterTemplate] = {
@@ -25,6 +29,7 @@ INVERTER_TEMPLATES: dict[str, InverterTemplate] = {
         id="solax_modbus",
         label="Solax Modbus (wills106)",
         description="SolaX Power inverters via Modbus RS485/TCP",
+        control_type="select",
         mode_self_use="Self Use Mode",
         mode_manual="Manual Mode",
         charge_force="Force Charge",
@@ -40,25 +45,11 @@ INVERTER_TEMPLATES: dict[str, InverterTemplate] = {
             "inverter_discharge_min_soc": "e.g. number.solax_inverter_selfuse_discharge_min_soc",
         },
     ),
-    "goodwe": InverterTemplate(
-        id="goodwe",
-        label="GoodWe",
-        description="GoodWe inverters via core or mletenay integration",
-        mode_self_use="general",
-        mode_manual="eco_charge",
-        charge_force="eco_charge",
-        charge_stop="general",
-        battery_capacity=10.0,
-        entity_hints={
-            "inverter_soc_sensor": "e.g. sensor.battery_state_of_charge",
-            "inverter_mode_select": "e.g. select.inverter_operation_mode",
-            "inverter_charge_command_select": "Same entity as mode select for GoodWe",
-        },
-    ),
     "solaredge_modbus": InverterTemplate(
         id="solaredge_modbus",
         label="SolarEdge Modbus",
         description="SolarEdge inverters via binsentsu Modbus integration",
+        control_type="select",
         mode_self_use="Maximize Self Consumption",
         mode_manual="Remote Control",
         charge_force="Charge from PV and AC",
@@ -73,6 +64,7 @@ INVERTER_TEMPLATES: dict[str, InverterTemplate] = {
         id="huawei_solar",
         label="Huawei Solar (wlcrs)",
         description="Huawei inverters — TOU-based workaround (service-based force charge planned)",
+        control_type="select",
         mode_self_use="Maximise Self Consumption",
         mode_manual="Time Of Use",
         charge_force="Time Of Use",
@@ -83,14 +75,29 @@ INVERTER_TEMPLATES: dict[str, InverterTemplate] = {
             "inverter_mode_select": "e.g. select.battery_working_mode",
         },
     ),
+    "wattsonic_ems": InverterTemplate(
+        id="wattsonic_ems",
+        label="Wattsonic GEN2 (EMS Modbus)",
+        description="Wattsonic hybrid inverters via Modbus RTU — EMS battery control mode",
+        control_type="ems_power",
+        battery_capacity=10.0,
+        ems_charge_mode_value=771,   # 0x0303 = EMS_BattCtrlMode
+        ems_normal_mode_value=257,   # 0x0101 = General Mode
+        entity_hints={
+            "inverter_soc_sensor": "Modbus sensor for register 43000 (SOC %)",
+            "inverter_capacity_sensor": "Battery capacity (configure in Modbus integration)",
+            "inverter_actual_solar_sensor": "Modbus sensor for register 41005 (PV today kWh)",
+            "inverter_working_mode_number": "Modbus number for register 50000 (Working Mode)",
+            "inverter_battery_power_number": "Modbus number for register 50207 (Battery Power W)",
+            "inverter_ac_lower_limit_number": "Modbus number for register 50209 (Min AC Power W)",
+            "inverter_battery_dod_number": "Modbus number for register 52503 (On-grid DOD %)",
+        },
+    ),
     "custom": InverterTemplate(
         id="custom",
         label="Custom / Other",
         description="Manual configuration for any inverter",
-        mode_self_use="",
-        mode_manual="",
-        charge_force="",
-        charge_stop="",
+        control_type="select",
         battery_capacity=15.0,
         entity_hints={},
     ),

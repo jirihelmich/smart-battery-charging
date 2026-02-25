@@ -5,6 +5,7 @@ No Home Assistant dependencies — fully unit-testable.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -105,8 +106,8 @@ class PriceAnalyzer:
             return 0
 
         hours_float = required_kwh / charge_power_kw
-        # Round up with 0.5 buffer
-        hours = max(1, int(hours_float + 0.5 + 0.5))
+        # H3: Round up to nearest integer (ceil)
+        hours = max(1, math.ceil(hours_float))
         max_window = self._get_window_size()
         return min(hours, max_window)
 

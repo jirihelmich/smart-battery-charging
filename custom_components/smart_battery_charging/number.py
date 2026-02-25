@@ -6,25 +6,36 @@ so changes from the dashboard/automations are persisted and used by the coordina
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from homeassistant.components.number import NumberEntity, NumberEntityDescription, NumberMode
+
+_LOGGER = logging.getLogger(__name__)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    CONF_CHARGING_EFFICIENCY,
+    CONF_EVENING_CONSUMPTION_MULTIPLIER,
     CONF_FALLBACK_CONSUMPTION,
     CONF_MAX_CHARGE_LEVEL,
     CONF_MAX_CHARGE_POWER,
     CONF_MAX_CHARGE_PRICE,
     CONF_MIN_SOC,
+    CONF_NIGHT_CONSUMPTION_MULTIPLIER,
+    CONF_WEEKEND_CONSUMPTION_MULTIPLIER,
+    DEFAULT_CHARGING_EFFICIENCY,
+    DEFAULT_EVENING_CONSUMPTION_MULTIPLIER,
     DEFAULT_FALLBACK_CONSUMPTION,
     DEFAULT_MAX_CHARGE_LEVEL,
     DEFAULT_MAX_CHARGE_POWER,
     DEFAULT_MAX_CHARGE_PRICE,
     DEFAULT_MIN_SOC,
+    DEFAULT_NIGHT_CONSUMPTION_MULTIPLIER,
+    DEFAULT_WEEKEND_CONSUMPTION_MULTIPLIER,
     DOMAIN,
 )
 from .coordinator import SmartBatteryCoordinator
@@ -110,6 +121,62 @@ NUMBER_DESCRIPTIONS: tuple[SmartBatteryNumberDescription, ...] = (
         getter=lambda c: c.fallback_consumption,
         setter=lambda c, v: setattr(c, "fallback_consumption", v),
     ),
+    SmartBatteryNumberDescription(
+        key="charging_efficiency",
+        translation_key="charging_efficiency",
+        icon="mdi:battery-charging-wireless",
+        native_min_value=0.70,
+        native_max_value=1.00,
+        native_step=0.01,
+        native_unit_of_measurement="ratio",
+        mode=NumberMode.BOX,
+        config_key=CONF_CHARGING_EFFICIENCY,
+        default_value=DEFAULT_CHARGING_EFFICIENCY,
+        getter=lambda c: c.charging_efficiency,
+        setter=lambda c, v: setattr(c, "charging_efficiency", v),
+    ),
+    SmartBatteryNumberDescription(
+        key="evening_consumption_multiplier",
+        translation_key="evening_consumption_multiplier",
+        icon="mdi:weather-sunset",
+        native_min_value=0.5,
+        native_max_value=3.0,
+        native_step=0.1,
+        native_unit_of_measurement="x",
+        mode=NumberMode.BOX,
+        config_key=CONF_EVENING_CONSUMPTION_MULTIPLIER,
+        default_value=DEFAULT_EVENING_CONSUMPTION_MULTIPLIER,
+        getter=lambda c: c.evening_consumption_multiplier,
+        setter=lambda c, v: setattr(c, "evening_consumption_multiplier", v),
+    ),
+    SmartBatteryNumberDescription(
+        key="night_consumption_multiplier",
+        translation_key="night_consumption_multiplier",
+        icon="mdi:weather-night",
+        native_min_value=0.1,
+        native_max_value=2.0,
+        native_step=0.1,
+        native_unit_of_measurement="x",
+        mode=NumberMode.BOX,
+        config_key=CONF_NIGHT_CONSUMPTION_MULTIPLIER,
+        default_value=DEFAULT_NIGHT_CONSUMPTION_MULTIPLIER,
+        getter=lambda c: c.night_consumption_multiplier,
+        setter=lambda c, v: setattr(c, "night_consumption_multiplier", v),
+    ),
+    SmartBatteryNumberDescription(
+        key="weekend_consumption_multiplier",
+        translation_key="weekend_consumption_multiplier",
+        icon="mdi:calendar-weekend",
+        native_min_value=0.5,
+        native_max_value=2.0,
+        native_step=0.05,
+        native_unit_of_measurement="x",
+        mode=NumberMode.BOX,
+        config_key=CONF_WEEKEND_CONSUMPTION_MULTIPLIER,
+        default_value=DEFAULT_WEEKEND_CONSUMPTION_MULTIPLIER,
+        getter=lambda c: c.weekend_consumption_multiplier,
+        setter=lambda c, v: setattr(c, "weekend_consumption_multiplier", v),
+    ),
 )
 
 
@@ -157,6 +224,28 @@ class SmartBatteryNumber(NumberEntity):
         return self.entity_description.getter(self.coordinator)
 
     async def async_set_native_value(self, value: float) -> None:
-        """Update the value."""
-        self.entity_description.setter(self.coordinator, value)
+        """Update the value, with min_soc/max_charge_level cross-validation."""
+        desc = self.entity_description
+
+        # Fix 8: Prevent min_soc >= max_charge_level
+        if desc.config_key == CONF_MIN_SOC:
+            max_level = self.coordinator.max_charge_level
+            if value >= max_level - 5:
+                clamped = max_level - 5
+                _LOGGER.warning(
+                    "min_soc %.0f%% too close to max_charge_level %.0f%%, clamping to %.0f%%",
+                    value, max_level, clamped,
+                )
+                value = clamped
+        elif desc.config_key == CONF_MAX_CHARGE_LEVEL:
+            min_soc = self.coordinator.min_soc
+            if value <= min_soc + 5:
+                clamped = min_soc + 5
+                _LOGGER.warning(
+                    "max_charge_level %.0f%% too close to min_soc %.0f%%, clamping to %.0f%%",
+                    value, min_soc, clamped,
+                )
+                value = clamped
+
+        desc.setter(self.coordinator, value)
         await self.coordinator.async_request_refresh()

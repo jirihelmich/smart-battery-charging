@@ -13,19 +13,17 @@ sys.path.insert(0, str(_COMPONENT_DIR))
 from inverter_templates import INVERTER_TEMPLATES, InverterTemplate, get_template
 
 
-REQUIRED_STRING_FIELDS = ("id", "label", "description", "mode_self_use", "mode_manual", "charge_force", "charge_stop")
-
-
 class TestInverterTemplates:
     """Tests for the INVERTER_TEMPLATES registry."""
 
     def test_all_templates_have_required_fields(self) -> None:
-        """Every template must have all required string fields set (or empty for custom)."""
+        """Every template must have all required string fields set."""
         for tid, tmpl in INVERTER_TEMPLATES.items():
             assert isinstance(tmpl, InverterTemplate), f"{tid}: not an InverterTemplate"
-            for field_name in REQUIRED_STRING_FIELDS:
-                value = getattr(tmpl, field_name)
-                assert isinstance(value, str), f"{tid}.{field_name} should be str, got {type(value)}"
+            assert isinstance(tmpl.id, str), f"{tid}.id should be str"
+            assert isinstance(tmpl.label, str), f"{tid}.label should be str"
+            assert isinstance(tmpl.description, str), f"{tid}.description should be str"
+            assert isinstance(tmpl.control_type, str), f"{tid}.control_type should be str"
             assert isinstance(tmpl.battery_capacity, float), f"{tid}.battery_capacity should be float"
             assert tmpl.battery_capacity > 0, f"{tid}.battery_capacity must be positive"
             assert isinstance(tmpl.entity_hints, dict), f"{tid}.entity_hints should be dict"
@@ -35,6 +33,12 @@ class TestInverterTemplates:
         for tid, tmpl in INVERTER_TEMPLATES.items():
             assert tmpl.id == tid, f"Key {tid!r} != template.id {tmpl.id!r}"
 
+    def test_control_type_valid(self) -> None:
+        """All templates must have a valid control_type."""
+        for tid, tmpl in INVERTER_TEMPLATES.items():
+            assert tmpl.control_type in ("select", "ems_power"), \
+                f"{tid}.control_type is {tmpl.control_type!r}, expected 'select' or 'ems_power'"
+
     def test_custom_template_has_empty_strings(self) -> None:
         """Custom template should have empty mode/command strings."""
         custom = INVERTER_TEMPLATES["custom"]
@@ -43,6 +47,7 @@ class TestInverterTemplates:
         assert custom.charge_force == ""
         assert custom.charge_stop == ""
         assert custom.entity_hints == {}
+        assert custom.control_type == "select"
 
     def test_solax_template_correct_values(self) -> None:
         """Solax template should have the known Modbus mode strings."""
@@ -53,21 +58,43 @@ class TestInverterTemplates:
         assert solax.charge_stop == "Stop Charge and Discharge"
         assert solax.battery_capacity == 15.0
         assert len(solax.entity_hints) == 7
+        assert solax.control_type == "select"
 
-    def test_non_custom_templates_have_nonempty_modes(self) -> None:
-        """All templates except 'custom' must have non-empty mode strings."""
+    def test_wattsonic_template_correct_values(self) -> None:
+        """Wattsonic template should have EMS control type and correct register values."""
+        ws = INVERTER_TEMPLATES["wattsonic_ems"]
+        assert ws.control_type == "ems_power"
+        assert ws.ems_charge_mode_value == 771  # 0x0303
+        assert ws.ems_normal_mode_value == 257   # 0x0101
+        assert ws.battery_capacity == 10.0
+        assert len(ws.entity_hints) == 7
+        # EMS templates don't use mode strings
+        assert ws.mode_self_use == ""
+        assert ws.mode_manual == ""
+
+    def test_non_custom_select_templates_have_nonempty_modes(self) -> None:
+        """All select-type templates except 'custom' must have non-empty mode strings."""
         for tid, tmpl in INVERTER_TEMPLATES.items():
-            if tid == "custom":
+            if tid == "custom" or tmpl.control_type != "select":
                 continue
             assert tmpl.mode_self_use, f"{tid}.mode_self_use is empty"
             assert tmpl.mode_manual, f"{tid}.mode_manual is empty"
             assert tmpl.charge_force, f"{tid}.charge_force is empty"
             assert tmpl.charge_stop, f"{tid}.charge_stop is empty"
 
+    def test_ems_templates_have_mode_values(self) -> None:
+        """EMS-type templates must have non-zero mode values."""
+        for tid, tmpl in INVERTER_TEMPLATES.items():
+            if tmpl.control_type != "ems_power":
+                continue
+            assert tmpl.ems_charge_mode_value > 0, f"{tid}.ems_charge_mode_value must be > 0"
+            assert tmpl.ems_normal_mode_value > 0, f"{tid}.ems_normal_mode_value must be > 0"
+
     def test_get_template_known_id(self) -> None:
         """get_template returns the correct template for a known ID."""
         assert get_template("solax_modbus") is INVERTER_TEMPLATES["solax_modbus"]
         assert get_template("custom") is INVERTER_TEMPLATES["custom"]
+        assert get_template("wattsonic_ems") is INVERTER_TEMPLATES["wattsonic_ems"]
 
     def test_get_template_unknown_id_falls_back_to_custom(self) -> None:
         """get_template returns custom for unknown IDs."""
@@ -75,7 +102,7 @@ class TestInverterTemplates:
         assert result is INVERTER_TEMPLATES["custom"]
 
     def test_expected_template_count(self) -> None:
-        """We expect exactly 5 templates (4 integrations + custom)."""
+        """We expect exactly 5 templates (3 select integrations + 1 EMS + custom)."""
         assert len(INVERTER_TEMPLATES) == 5
 
     def test_templates_are_frozen(self) -> None:

@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -47,6 +48,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         translation_key="average_daily_consumption",
         native_unit_of_measurement="kWh",
         device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["average_daily_consumption"],
         attrs_fn=lambda d: {
             "days_tracked": d["consumption_days_tracked"],
@@ -72,6 +74,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         key="solar_forecast_error_average",
         translation_key="solar_forecast_error_average",
         native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["solar_forecast_error_average"],
         attrs_fn=lambda d: {
             "days_tracked": d["forecast_error_days_tracked"],
@@ -108,6 +111,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         translation_key="battery_charge_kwh",
         native_unit_of_measurement="kWh",
         device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["battery_charge_kwh"],
     ),
     SmartBatterySensorDescription(
@@ -115,6 +119,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         translation_key="battery_usable_charge",
         native_unit_of_measurement="kWh",
         device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["battery_usable_charge"],
         attrs_fn=lambda d: {
             "total_usable_capacity": f"{d['usable_capacity_total']} kWh",
@@ -150,6 +155,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         translation_key="last_night_charge_kwh",
         native_unit_of_measurement="kWh",
         device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["last_night_charge_kwh"],
         attrs_fn=lambda d: {
             "start_soc": f"{d['last_session'].start_soc:.1f}%" if d.get("last_session") else "N/A",
@@ -174,6 +180,8 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         key="last_charge_total_cost",
         translation_key="last_charge_total_cost",
         icon="mdi:cash",
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.MONETARY,
         value_fn=lambda d: d["last_charge_total_cost"],
         attrs_fn=lambda d: {
             "currency": d["currency"],
@@ -245,6 +253,12 @@ class SmartBatterySensor(
             "manufacturer": "Smart Battery Charging",
             "model": "Virtual",
         }
+        # Set currency unit for monetary sensor
+        if description.key == "last_charge_total_cost":
+            currency = coordinator.currency
+            # Extract currency symbol (e.g. "Kč" from "Kč/kWh")
+            unit = currency.split("/")[0] if "/" in currency else currency
+            self._attr_native_unit_of_measurement = unit
 
     @property
     def native_value(self) -> Any:

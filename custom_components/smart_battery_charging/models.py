@@ -18,17 +18,6 @@ class ChargingState(Enum):
 
 
 @dataclass
-class PriceWindow:
-    """A contiguous window of hours with their prices."""
-
-    start_hour: int
-    end_hour: int
-    avg_price: float
-    window_hours: int
-    prices: list[float] = field(default_factory=list)
-
-
-@dataclass
 class ChargingSchedule:
     """A planned charging session."""
 
@@ -51,11 +40,6 @@ class ChargingSession:
     end_time: str = ""
     avg_price: float = 0.0
     result: str = ""
-
-    @property
-    def charged_kwh(self) -> float:
-        """Cannot compute without battery capacity — use kwh_charged(capacity)."""
-        return 0.0
 
     def kwh_charged(self, battery_capacity_kwh: float) -> float:
         """Calculate kWh charged from SOC delta."""

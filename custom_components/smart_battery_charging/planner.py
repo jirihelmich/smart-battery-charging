@@ -10,12 +10,23 @@ import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+from .const import (
+    EMERGENCY_SOC_THRESHOLD,
+    MAX_OVERNIGHT_HOURS,
+    PV_FALLBACK_BUFFER_HOURS,
+    PV_RAMP_BUFFER_HOURS,
+)
 from .models import ChargingSchedule, EnergyDeficit, OvernightNeed
 
 if TYPE_CHECKING:
     from .coordinator import SmartBatteryCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _default_now() -> datetime:
+    """Fallback for when no `now` is passed (e.g. in tests)."""
+    return datetime.now()
 
 
 class ChargingPlanner:
@@ -25,16 +36,24 @@ class ChargingPlanner:
         self._coordinator = coordinator
         self.last_overnight_need: OvernightNeed | None = None
 
-    def compute_energy_deficit(self) -> EnergyDeficit:
+    def compute_energy_deficit(self, *, now: datetime | None = None) -> EnergyDeficit:
         """Compute energy deficit for tomorrow.
 
         Returns an EnergyDeficit with consumption, solar (raw and adjusted),
         forecast error percentage, deficit, charge needed, and usable capacity.
+        Applies weekend multiplier if tomorrow is Saturday or Sunday.
         """
+        if now is None:
+            now = _default_now()
         c = self._coordinator
 
         # Get consumption average
         consumption = c.consumption_tracker.average(c.store.consumption_history)
+
+        # Apply weekend multiplier if tomorrow is weekend
+        tomorrow = now + timedelta(days=1)
+        if tomorrow.weekday() >= 5:  # Saturday=5, Sunday=6
+            consumption *= c.weekend_consumption_multiplier
 
         # Get solar forecast and adjust for historical error
         solar_raw = c.solar_forecast_tomorrow
@@ -61,9 +80,11 @@ class ChargingPlanner:
             usable_capacity=round(usable_capacity, 2),
         )
 
-    def has_tomorrow_prices(self) -> bool:
+    def has_tomorrow_prices(self, *, now: datetime | None = None) -> bool:
         """Check if tomorrow's prices are available in the price sensor attributes."""
-        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        if now is None:
+            now = _default_now()
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
         attrs = self._coordinator.price_attributes
         for key in attrs:
             key_str = str(key)
@@ -71,15 +92,42 @@ class ChargingPlanner:
                 return True
         return False
 
-    def compute_overnight_need(self) -> OvernightNeed:
+    def _hourly_consumption(self, hour: int, daily: float) -> float:
+        """Return kWh consumption for a given hour using the 3-period model.
+
+        Periods: Day (06-18) multiplier=1.0, Evening (18-23) multiplier=E, Night (23-06) multiplier=N.
+        base_rate = daily / (12*1.0 + 5*E + 7*N)
+        """
+        c = self._coordinator
+        e = c.evening_consumption_multiplier
+        n = c.night_consumption_multiplier
+        base_rate = daily / (12 * 1.0 + 5 * e + 7 * n)
+
+        if 6 <= hour < 18:
+            return base_rate * 1.0
+        elif 18 <= hour < 23:
+            return base_rate * e
+        else:  # 23-06
+            return base_rate * n
+
+    def compute_overnight_need(self, *, now: datetime | None = None) -> OvernightNeed:
         """Compute how much energy the battery needs to survive until solar kicks in.
 
         Simulates hour-by-hour drain from window_start until solar production
         covers consumption. Compares cumulative drain against estimated battery
-        at window_start.
+        at window_start. Uses per-hour consumption profiles.
         """
+        if now is None:
+            now = _default_now()
         c = self._coordinator
-        hourly_consumption = c.consumption_tracker.average(c.store.consumption_history) / 24
+        daily_consumption = c.consumption_tracker.average(c.store.consumption_history)
+
+        # Apply weekend multiplier if tomorrow is weekend
+        tomorrow = now + timedelta(days=1)
+        if tomorrow.weekday() >= 5:
+            daily_consumption *= c.weekend_consumption_multiplier
+
+        flat_hourly = daily_consumption / 24
         usable_capacity = c.battery_capacity * (c.max_charge_level - c.min_soc) / 100
 
         window_start = c.price_analyzer._window_start  # e.g. 22
@@ -92,21 +140,20 @@ class ChargingPlanner:
         if hourly_solar:
             source = "forecast_solar"
             # Find the hour when solar >= hourly consumption
-            solar_start_hour = float(window_end + 3)  # default: 3h after window end
+            solar_start_hour = float(window_end + PV_FALLBACK_BUFFER_HOURS)
             for hour in range(24):
-                if hourly_solar.get(hour, 0) >= hourly_consumption:
+                if hourly_solar.get(hour, 0) >= flat_hourly:
                     solar_start_hour = float(hour)
                     break
         else:
             sunrise = c.sunrise_hour_tomorrow
             if sunrise is not None:
                 source = "sun_entity"
-                solar_start_hour = sunrise + 2.0  # 2h buffer for PV ramp-up
+                solar_start_hour = sunrise + PV_RAMP_BUFFER_HOURS
             else:
-                solar_start_hour = float(window_end + 3)  # fallback: ~09:00
+                solar_start_hour = float(window_end + PV_FALLBACK_BUFFER_HOURS)
 
         # Simulate hour-by-hour from window_start to solar_start_hour
-        # Normalize solar_start relative to window_start for easy comparison
         solar_start_normalized = solar_start_hour
         if solar_start_normalized < window_start:
             solar_start_normalized += 24
@@ -114,15 +161,15 @@ class ChargingPlanner:
 
         cumulative_drain = 0.0
         dark_hours = 0.0
-        while dark_hours < target_hours and dark_hours < 14:
+        while dark_hours < target_hours and dark_hours < MAX_OVERNIGHT_HOURS:
             actual_hour = int(window_start + dark_hours) % 24
+            hourly_cons = self._hourly_consumption(actual_hour, daily_consumption)
             solar_this_hour = hourly_solar.get(actual_hour, 0.0) if hourly_solar else 0.0
-            net_drain = max(0.0, hourly_consumption - solar_this_hour)
+            net_drain = max(0.0, hourly_cons - solar_this_hour)
             cumulative_drain += net_drain
             dark_hours += 1.0
 
         # Estimate battery at window_start
-        now = datetime.now()
         current_hour = now.hour + now.minute / 60
         hours_to_window = window_start - current_hour
         if hours_to_window < 0:
@@ -139,13 +186,17 @@ class ChargingPlanner:
             ) - c.actual_solar_today,
         )
         pre_window_drain = max(
-            0.0, hours_to_window * hourly_consumption - remaining_solar_today
+            0.0, hours_to_window * flat_hourly - remaining_solar_today
         )
         battery_at_window_start = max(0.0, current_usable - pre_window_drain)
 
-        # Shortfall
+        # Shortfall — apply charging efficiency
         shortfall = cumulative_drain - battery_at_window_start
-        charge_needed = round(max(0.0, min(shortfall, usable_capacity)), 2)
+        charge_needed = max(0.0, min(shortfall, usable_capacity))
+        if charge_needed > 0:
+            charge_needed /= c.charging_efficiency
+            charge_needed = min(charge_needed, usable_capacity)
+        charge_needed = round(charge_needed, 2)
 
         return OvernightNeed(
             dark_hours=round(dark_hours, 1),
@@ -172,7 +223,7 @@ class ChargingPlanner:
         target = c.min_soc + charge_pct
         return min(round(target, 1), c.max_charge_level)
 
-    def plan_charging(self) -> ChargingSchedule | None:
+    def plan_charging(self, *, now: datetime | None = None) -> ChargingSchedule | None:
         """Full planning pipeline.
 
         Returns a ChargingSchedule if charging is needed and prices are acceptable,
@@ -181,6 +232,8 @@ class ChargingPlanner:
         Considers both daily energy deficit AND overnight survival. The larger
         of the two determines the actual charge needed.
         """
+        if now is None:
+            now = _default_now()
         c = self._coordinator
 
         if not c.enabled:
@@ -188,12 +241,12 @@ class ChargingPlanner:
             return None
 
         # Check if tomorrow's prices are available
-        if not self.has_tomorrow_prices():
+        if not self.has_tomorrow_prices(now=now):
             _LOGGER.debug("Tomorrow's prices not available yet")
             return None
 
         # Compute energy deficit
-        deficit = self.compute_energy_deficit()
+        deficit = self.compute_energy_deficit(now=now)
         _LOGGER.info(
             "Energy deficit: consumption=%.1f, solar_adjusted=%.1f, deficit=%.1f, charge_needed=%.1f",
             deficit.consumption,
@@ -203,7 +256,7 @@ class ChargingPlanner:
         )
 
         # Compute overnight survival need
-        overnight = self.compute_overnight_need()
+        overnight = self.compute_overnight_need(now=now)
         self.last_overnight_need = overnight
         c._last_overnight = overnight
         _LOGGER.info(
@@ -218,6 +271,12 @@ class ChargingPlanner:
         # Use the larger of daily deficit and overnight need
         effective_charge = max(deficit.charge_needed, overnight.charge_needed)
 
+        # Apply charging efficiency to daily deficit portion
+        if deficit.charge_needed > 0 and deficit.charge_needed >= overnight.charge_needed:
+            effective_charge = deficit.charge_needed / c.charging_efficiency
+            usable_capacity = c.battery_capacity * (c.max_charge_level - c.min_soc) / 100
+            effective_charge = min(effective_charge, usable_capacity)
+
         if effective_charge <= 0:
             _LOGGER.info("No charging needed — solar covers consumption and battery covers overnight")
             return None
@@ -229,15 +288,7 @@ class ChargingPlanner:
                 deficit.charge_needed,
             )
 
-        # Calculate hours needed
-        hours_needed = c.price_analyzer.calculate_hours_needed(
-            effective_charge, c.max_charge_power
-        )
-        if hours_needed == 0:
-            return None
-
         # Extract night prices and find cheapest window
-        now = datetime.now()
         today = now.strftime("%Y-%m-%d")
         tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -249,6 +300,24 @@ class ChargingPlanner:
             _LOGGER.warning("No night price slots available")
             return None
 
+        # Fix 11: Negative price exploitation — charge to max when it's free/profitable
+        usable_capacity = c.battery_capacity * (c.max_charge_level - c.min_soc) / 100
+        if night_slots:
+            cheapest_price = min(slot.price for slot in night_slots)
+            if cheapest_price <= 0 and effective_charge < usable_capacity:
+                _LOGGER.info(
+                    "Negative prices detected (%.2f), charging to maximum capacity %.1f kWh",
+                    cheapest_price, usable_capacity,
+                )
+                effective_charge = usable_capacity
+
+        # Calculate hours needed
+        hours_needed = c.price_analyzer.calculate_hours_needed(
+            effective_charge, c.max_charge_power
+        )
+        if hours_needed == 0:
+            return None
+
         window = c.price_analyzer.find_cheapest_window(night_slots, hours_needed)
         if window is None:
             _LOGGER.warning(
@@ -257,14 +326,24 @@ class ChargingPlanner:
             )
             return None
 
-        # Check price threshold
-        if window.avg_price > c.max_charge_price:
-            _LOGGER.info(
-                "Cheapest window avg price %.2f exceeds threshold %.2f, skipping",
-                window.avg_price,
-                c.max_charge_price,
-            )
-            return None
+        # Check price threshold — skip check if avg price is <= 0 (getting paid)
+        if window.avg_price > 0 and window.avg_price > c.max_charge_price:
+            # M2: Emergency low-battery override
+            current_soc = c.current_soc
+            if current_soc < EMERGENCY_SOC_THRESHOLD and effective_charge > 0:
+                _LOGGER.warning(
+                    "Battery at %.0f%% (below emergency threshold %.0f%%) — "
+                    "overriding price threshold (%.2f > %.2f)",
+                    current_soc, EMERGENCY_SOC_THRESHOLD,
+                    window.avg_price, c.max_charge_price,
+                )
+            else:
+                _LOGGER.info(
+                    "Cheapest window avg price %.2f exceeds threshold %.2f, skipping",
+                    window.avg_price,
+                    c.max_charge_price,
+                )
+                return None
 
         target_soc = self.compute_target_soc(deficit, charge_kwh=effective_charge)
 

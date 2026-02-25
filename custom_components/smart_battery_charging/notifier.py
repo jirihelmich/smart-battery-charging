@@ -11,17 +11,23 @@ import logging
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.util import dt as dt_util
+
 from .const import (
     CONF_NOTIFICATION_SERVICE,
     CONF_NOTIFY_CHARGING_COMPLETE,
+    CONF_NOTIFY_CHARGING_STALLED,
     CONF_NOTIFY_CHARGING_START,
     CONF_NOTIFY_MORNING_SAFETY,
     CONF_NOTIFY_PLANNING,
+    CONF_NOTIFY_SENSOR_UNAVAILABLE,
     DEFAULT_NOTIFICATION_SERVICE,
     DEFAULT_NOTIFY_CHARGING_COMPLETE,
+    DEFAULT_NOTIFY_CHARGING_STALLED,
     DEFAULT_NOTIFY_CHARGING_START,
     DEFAULT_NOTIFY_MORNING_SAFETY,
     DEFAULT_NOTIFY_PLANNING,
+    DEFAULT_NOTIFY_SENSOR_UNAVAILABLE,
 )
 from .models import ChargingSchedule, ChargingSession, EnergyDeficit, OvernightNeed
 
@@ -183,9 +189,7 @@ class ChargingNotifier:
         ):
             return
 
-        from datetime import datetime
-
-        now = datetime.now().strftime("%H:%M")
+        now = dt_util.now().strftime("%H:%M")
         title = "🔋 Charging Started"
         message = (
             f"Time: {now}\n"
@@ -242,5 +246,44 @@ class ChargingNotifier:
             f"Morning safety triggered.\n"
             f"SOC: {soc:.0f}%\n"
             f"Mode restored to Self Use."
+        )
+        await self._async_send(title, message)
+
+    async def async_notify_charging_stalled(
+        self,
+        soc: float,
+        target_soc: float,
+        minutes_stalled: int,
+    ) -> None:
+        """Send notification when charging appears stalled."""
+        if not self._is_enabled(
+            CONF_NOTIFY_CHARGING_STALLED, DEFAULT_NOTIFY_CHARGING_STALLED
+        ):
+            return
+
+        title = "⚠️ Charging Stalled"
+        message = (
+            f"Charging stalled for {minutes_stalled} minutes.\n"
+            f"SOC: {soc:.0f}% (target: {target_soc:.0f}%)\n"
+            f"Charging aborted. Check inverter."
+        )
+        await self._async_send(title, message)
+
+    async def async_notify_sensor_unavailable(
+        self,
+        sensor_name: str,
+        entity_id: str,
+    ) -> None:
+        """Send notification when a critical sensor is unavailable (H1)."""
+        if not self._is_enabled(
+            CONF_NOTIFY_SENSOR_UNAVAILABLE, DEFAULT_NOTIFY_SENSOR_UNAVAILABLE
+        ):
+            return
+
+        title = "⚠️ Sensor Unavailable"
+        message = (
+            f"{sensor_name} sensor is unavailable.\n"
+            f"Entity: {entity_id}\n"
+            f"Charging decisions may be incorrect until sensor recovers."
         )
         await self._async_send(title, message)

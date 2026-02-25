@@ -6,13 +6,13 @@ Central hub that holds all sub-components and recomputes derived values.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
-from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
     from .charging_controller import ChargingStateMachine
@@ -22,8 +22,10 @@ if TYPE_CHECKING:
 
 from .const import (
     CONF_BATTERY_CAPACITY,
+    CONF_CHARGING_EFFICIENCY,
     CONF_CONSUMPTION_SENSOR,
     CONF_CURRENCY,
+    CONF_EVENING_CONSUMPTION_MULTIPLIER,
     CONF_FALLBACK_CONSUMPTION,
     CONF_INVERTER_ACTUAL_SOLAR_SENSOR,
     CONF_INVERTER_CAPACITY_SENSOR,
@@ -32,21 +34,28 @@ from .const import (
     CONF_MAX_CHARGE_POWER,
     CONF_MAX_CHARGE_PRICE,
     CONF_MIN_SOC,
+    CONF_NIGHT_CONSUMPTION_MULTIPLIER,
     CONF_PRICE_SENSOR,
     CONF_SOLAR_FORECAST_TODAY,
     CONF_SOLAR_FORECAST_TOMORROW,
+    CONF_WEEKEND_CONSUMPTION_MULTIPLIER,
     CONF_WINDOW_END_HOUR,
     CONF_WINDOW_START_HOUR,
     DEFAULT_BATTERY_CAPACITY,
+    DEFAULT_CHARGING_EFFICIENCY,
     DEFAULT_CURRENCY,
+    DEFAULT_EVENING_CONSUMPTION_MULTIPLIER,
     DEFAULT_FALLBACK_CONSUMPTION,
     DEFAULT_MAX_CHARGE_LEVEL,
     DEFAULT_MAX_CHARGE_POWER,
     DEFAULT_MAX_CHARGE_PRICE,
     DEFAULT_MIN_SOC,
+    DEFAULT_NIGHT_CONSUMPTION_MULTIPLIER,
+    DEFAULT_WEEKEND_CONSUMPTION_MULTIPLIER,
     DEFAULT_WINDOW_END_HOUR,
     DEFAULT_WINDOW_START_HOUR,
     DOMAIN,
+    SENSOR_UNAVAILABLE_TICKS,
     UPDATE_INTERVAL_SECONDS,
 )
 from .consumption_tracker import ConsumptionTracker
@@ -89,8 +98,8 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             window_end_hour=self._opt(CONF_WINDOW_END_HOUR, DEFAULT_WINDOW_END_HOUR),
         )
 
-        # Mutable state
-        self.enabled: bool = True
+        # Mutable state — initialized from store in __init__.py after async_load()
+        self.enabled: bool = True  # overwritten from store.enabled
         self.charging_state: ChargingState = ChargingState.IDLE
         self.current_schedule: ChargingSchedule | None = None
         self._last_overnight: OvernightNeed | None = None
@@ -100,6 +109,12 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.state_machine: ChargingStateMachine | None = None
         self.planner: ChargingPlanner | None = None
         self.notifier: ChargingNotifier | None = None
+
+        # Sensor health tracking (H1)
+        self._soc_unavailable_ticks: int = 0
+        self._price_unavailable_ticks: int = 0
+        self._soc_unavailable_notified: bool = False
+        self._price_unavailable_notified: bool = False
 
     def _opt(self, key: str, default: Any) -> Any:
         """Get a config value, preferring options over data."""
@@ -159,6 +174,38 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.consumption_tracker.fallback_kwh = value
 
     @property
+    def charging_efficiency(self) -> float:
+        return float(self._opt(CONF_CHARGING_EFFICIENCY, DEFAULT_CHARGING_EFFICIENCY))
+
+    @charging_efficiency.setter
+    def charging_efficiency(self, value: float) -> None:
+        self._update_option(CONF_CHARGING_EFFICIENCY, value)
+
+    @property
+    def evening_consumption_multiplier(self) -> float:
+        return float(self._opt(CONF_EVENING_CONSUMPTION_MULTIPLIER, DEFAULT_EVENING_CONSUMPTION_MULTIPLIER))
+
+    @evening_consumption_multiplier.setter
+    def evening_consumption_multiplier(self, value: float) -> None:
+        self._update_option(CONF_EVENING_CONSUMPTION_MULTIPLIER, value)
+
+    @property
+    def night_consumption_multiplier(self) -> float:
+        return float(self._opt(CONF_NIGHT_CONSUMPTION_MULTIPLIER, DEFAULT_NIGHT_CONSUMPTION_MULTIPLIER))
+
+    @night_consumption_multiplier.setter
+    def night_consumption_multiplier(self, value: float) -> None:
+        self._update_option(CONF_NIGHT_CONSUMPTION_MULTIPLIER, value)
+
+    @property
+    def weekend_consumption_multiplier(self) -> float:
+        return float(self._opt(CONF_WEEKEND_CONSUMPTION_MULTIPLIER, DEFAULT_WEEKEND_CONSUMPTION_MULTIPLIER))
+
+    @weekend_consumption_multiplier.setter
+    def weekend_consumption_multiplier(self, value: float) -> None:
+        self._update_option(CONF_WEEKEND_CONSUMPTION_MULTIPLIER, value)
+
+    @property
     def currency(self) -> str:
         return str(self._opt(CONF_CURRENCY, DEFAULT_CURRENCY))
 
@@ -178,6 +225,15 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return float(state.state)
         except (ValueError, TypeError):
             return default
+
+    def _is_sensor_available(self, entity_id: str) -> bool:
+        """Check if a sensor entity is available."""
+        if not entity_id:
+            return True  # No entity configured, skip
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return False
+        return True
 
     def _get_state_attrs(self, entity_id: str) -> dict[str, Any]:
         """Get attributes dict from a HA entity."""
@@ -199,14 +255,28 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def inverter_capacity_kwh(self) -> float:
-        """Battery capacity from inverter BMS (Wh → kWh), falls back to config."""
-        raw = self._get_state_float(
-            self.entry.data.get(CONF_INVERTER_CAPACITY_SENSOR, ""), 0
-        )
-        # BMS reports in Wh, convert to kWh
+        """Battery capacity from inverter BMS (Wh → kWh), falls back to config.
+
+        M4: Uses unit_of_measurement attribute when available, falls back to heuristic.
+        """
+        entity_id = self.entry.data.get(CONF_INVERTER_CAPACITY_SENSOR, "")
+        raw = self._get_state_float(entity_id, 0)
+        if raw <= 0:
+            return self._configured_battery_capacity
+
+        # M4: Check unit of measurement first
+        state = self.hass.states.get(entity_id)
+        if state is not None:
+            uom = state.attributes.get("unit_of_measurement", "")
+            if uom in ("Wh", "wh"):
+                return raw / 1000
+            if uom in ("kWh", "kwh"):
+                return raw
+
+        # Fallback heuristic: BMS often reports in Wh
         if raw > 1000:
             return raw / 1000
-        return raw if raw > 0 else self._configured_battery_capacity
+        return raw
 
     @property
     def actual_solar_today(self) -> float:
@@ -254,7 +324,8 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Combines all forecast_solar config entries.
         """
         result: dict[int, float] = {}
-        tomorrow = (datetime.now() + timedelta(days=1)).date()
+        now = dt_util.now()
+        tomorrow = (now + timedelta(days=1)).date()
 
         try:
             entries = self.hass.config_entries.async_entries("forecast_solar")
@@ -337,11 +408,44 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             forecast, actual, error * 100,
         )
 
+    # --- Sensor health monitoring (H1) ---
+
+    async def _check_sensor_health(self, data: dict[str, Any]) -> None:
+        """Check critical sensors for unavailability and notify if prolonged."""
+        soc_entity = self.entry.data.get(CONF_INVERTER_SOC_SENSOR, "")
+        price_entity = self.entry.data.get(CONF_PRICE_SENSOR, "")
+
+        # SOC sensor
+        if soc_entity and not self._is_sensor_available(soc_entity):
+            self._soc_unavailable_ticks += 1
+            data["soc_sensor_available"] = False
+            if self._soc_unavailable_ticks >= SENSOR_UNAVAILABLE_TICKS and not self._soc_unavailable_notified:
+                self._soc_unavailable_notified = True
+                if self.notifier:
+                    await self.notifier.async_notify_sensor_unavailable("Battery SOC", soc_entity)
+        else:
+            self._soc_unavailable_ticks = 0
+            self._soc_unavailable_notified = False
+            data["soc_sensor_available"] = True
+
+        # Price sensor
+        if price_entity and not self._is_sensor_available(price_entity):
+            self._price_unavailable_ticks += 1
+            data["price_sensor_available"] = False
+            if self._price_unavailable_ticks >= SENSOR_UNAVAILABLE_TICKS and not self._price_unavailable_notified:
+                self._price_unavailable_notified = True
+                if self.notifier:
+                    await self.notifier.async_notify_sensor_unavailable("Electricity Price", price_entity)
+        else:
+            self._price_unavailable_ticks = 0
+            self._price_unavailable_notified = False
+            data["price_sensor_available"] = True
+
     # --- Main update ---
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Recompute all derived values."""
-        now = datetime.now()
+        now = dt_util.now()
         today = now.strftime("%Y-%m-%d")
         tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -373,10 +477,22 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             solar_tomorrow, error_history
         )
 
-        # Energy deficit
-        energy_deficit = avg_consumption - adjusted_solar_tomorrow
-        usable_capacity = self.battery_capacity * (self.max_charge_level - self.min_soc) / 100
-        charge_needed = max(0.0, min(energy_deficit, usable_capacity)) if energy_deficit > 0 else 0.0
+        # H4: Energy deficit — use planner if available for consistent values
+        if self.planner is not None:
+            try:
+                deficit_result = self.planner.compute_energy_deficit(now=now)
+                energy_deficit = deficit_result.deficit
+                charge_needed = deficit_result.charge_needed
+                usable_capacity = deficit_result.usable_capacity
+            except Exception:
+                _LOGGER.debug("Planner energy deficit failed, using fallback")
+                energy_deficit = avg_consumption - adjusted_solar_tomorrow
+                usable_capacity = self.battery_capacity * (self.max_charge_level - self.min_soc) / 100
+                charge_needed = max(0.0, min(energy_deficit, usable_capacity)) if energy_deficit > 0 else 0.0
+        else:
+            energy_deficit = avg_consumption - adjusted_solar_tomorrow
+            usable_capacity = self.battery_capacity * (self.max_charge_level - self.min_soc) / 100
+            charge_needed = max(0.0, min(energy_deficit, usable_capacity)) if energy_deficit > 0 else 0.0
 
         # Battery calculations
         capacity_kwh = self.battery_capacity
@@ -416,7 +532,7 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and soc < self.max_charge_level
         )
 
-        return {
+        data: dict[str, Any] = {
             # Consumption
             "average_daily_consumption": avg_consumption,
             "consumption_days_tracked": self.consumption_tracker.days_tracked(consumption_history),
@@ -473,7 +589,15 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Settings (for sensor attributes)
             "currency": self.currency,
             "enabled": self.enabled,
+            # Sensor health (H1)
+            "soc_sensor_available": True,
+            "price_sensor_available": True,
         }
+
+        # H1: Check sensor health
+        await self._check_sensor_health(data)
+
+        return data
 
     def _compute_charging_status(self, soc: float) -> str:
         """Compute the night charging status string."""

@@ -17,16 +17,45 @@ from homeassistant.helpers.event import (
     async_track_time_change,
     async_track_time_interval,
 )
+from homeassistant.util import dt as dt_util
 
 from .charging_controller import ChargingStateMachine
-from .const import CONF_PRICE_SENSOR, DOMAIN, PLATFORMS
+from .const import (
+    CONF_CONTROL_TYPE,
+    CONF_INVERTER_TEMPLATE,
+    CONF_PRICE_SENSOR,
+    CONTROL_TYPE_SELECT,
+    DOMAIN,
+    MORNING_SAFETY_OFFSET_MINUTES,
+    PLATFORMS,
+)
 from .coordinator import SmartBatteryCoordinator
 from .inverter_controller import InverterController
+from .inverter_templates import get_template
+from .models import ChargingSchedule, ChargingState
 from .notifier import ChargingNotifier
 from .planner import ChargingPlanner
 from .storage import SmartBatteryStore
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _restore_schedule_from_dict(data: dict) -> ChargingSchedule | None:
+    """Deserialize a schedule dict from storage into a ChargingSchedule."""
+    if not data:
+        return None
+    try:
+        return ChargingSchedule(
+            start_hour=int(data["start_hour"]),
+            end_hour=int(data["end_hour"]),
+            window_hours=int(data["window_hours"]),
+            avg_price=float(data["avg_price"]),
+            required_kwh=float(data["required_kwh"]),
+            target_soc=float(data["target_soc"]),
+        )
+    except (KeyError, ValueError, TypeError):
+        _LOGGER.warning("Could not restore schedule from storage: %s", data)
+        return None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -37,12 +66,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store = SmartBatteryStore(hass, entry.entry_id)
     await store.async_load()
 
-    # Create coordinator
+    # Create coordinator, restore enabled state from store
     coordinator = SmartBatteryCoordinator(hass, entry, store)
+    coordinator.enabled = store.enabled
     await coordinator.async_config_entry_first_refresh()
 
+    # Determine control type from template or config
+    template_id = entry.data.get(CONF_INVERTER_TEMPLATE, "custom")
+    template = get_template(template_id)
+    control_type = entry.data.get(CONF_CONTROL_TYPE, template.control_type)
+
     # Create Phase 2 components
-    inverter = InverterController(hass, dict(entry.data))
+    inverter = InverterController(hass, dict(entry.data), control_type=control_type)
     planner = ChargingPlanner(coordinator)
     notifier = ChargingNotifier(hass, coordinator)
     state_machine = ChargingStateMachine(coordinator, inverter, notifier)
@@ -53,13 +88,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.state_machine = state_machine
     coordinator.notifier = notifier
 
+    # Restore charging state from store (C1)
+    _restore_charging_state(coordinator, store)
+
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Register event listeners
-    _register_event_listeners(hass, entry, coordinator, planner, state_machine)
+    _register_event_listeners(hass, entry, coordinator, planner, state_machine, notifier)
 
     # Listen for options updates
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -68,12 +106,47 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _restore_charging_state(
+    coordinator: SmartBatteryCoordinator,
+    store: SmartBatteryStore,
+) -> None:
+    """Restore charging state and schedule from persistent storage."""
+    stored_state = store.charging_state
+    stored_schedule = store.current_schedule
+
+    try:
+        state = ChargingState(stored_state)
+    except ValueError:
+        _LOGGER.warning("Unknown stored charging state '%s', defaulting to IDLE", stored_state)
+        state = ChargingState.IDLE
+
+    # If we were CHARGING on restart, resume as SCHEDULED (safer — next tick re-evaluates)
+    if state == ChargingState.CHARGING:
+        _LOGGER.info("Was CHARGING on shutdown, resuming as SCHEDULED for safe re-evaluation")
+        state = ChargingState.SCHEDULED
+
+    coordinator.charging_state = state
+
+    if stored_schedule:
+        schedule = _restore_schedule_from_dict(stored_schedule)
+        if schedule:
+            coordinator.current_schedule = schedule
+            _LOGGER.info(
+                "Restored schedule: %02d:00-%02d:00, target %.0f%%",
+                schedule.start_hour, schedule.end_hour, schedule.target_soc,
+            )
+
+    if state != ChargingState.IDLE:
+        _LOGGER.info("Restored charging state: %s", state.value)
+
+
 def _register_event_listeners(
     hass: HomeAssistant,
     entry: ConfigEntry,
     coordinator: SmartBatteryCoordinator,
     planner: ChargingPlanner,
     state_machine: ChargingStateMachine,
+    notifier: ChargingNotifier,
 ) -> None:
     """Register all event listeners for charging automation."""
 
@@ -83,8 +156,9 @@ def _register_event_listeners(
             _LOGGER.debug("Skipping planner — charging disabled")
             return
         try:
-            deficit = planner.compute_energy_deficit()
-            schedule = planner.plan_charging()
+            now = dt_util.now()
+            deficit = planner.compute_energy_deficit(now=now)
+            schedule = planner.plan_charging(now=now)
             overnight = planner.last_overnight_need
             await state_machine.async_on_plan(schedule)
             await notifier.async_notify_plan(schedule, deficit, overnight)
@@ -134,8 +208,8 @@ def _register_event_listeners(
     unsub = async_track_time_interval(hass, _on_tick, timedelta(minutes=2))
     entry.async_on_unload(unsub)
 
-    # 4. Sunrise - 15 minutes → morning safety
-    unsub = async_track_sunrise(hass, _on_morning_safety, offset=timedelta(minutes=-15))
+    # 4. Sunrise - N minutes → morning safety
+    unsub = async_track_sunrise(hass, _on_morning_safety, offset=timedelta(minutes=-MORNING_SAFETY_OFFSET_MINUTES))
     entry.async_on_unload(unsub)
 
     # 5. 23:55 → daily consumption + forecast error recorder

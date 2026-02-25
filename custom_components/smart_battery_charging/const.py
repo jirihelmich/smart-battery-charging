@@ -40,6 +40,18 @@ CONF_WINDOW_START_HOUR = "window_start_hour"
 CONF_WINDOW_END_HOUR = "window_end_hour"
 CONF_CURRENCY = "currency"
 
+# Charging efficiency (Fix 1)
+CONF_CHARGING_EFFICIENCY = "charging_efficiency"
+DEFAULT_CHARGING_EFFICIENCY = 0.90
+
+# Consumption profiles (Fix 5/6)
+CONF_EVENING_CONSUMPTION_MULTIPLIER = "evening_consumption_multiplier"
+CONF_NIGHT_CONSUMPTION_MULTIPLIER = "night_consumption_multiplier"
+CONF_WEEKEND_CONSUMPTION_MULTIPLIER = "weekend_consumption_multiplier"
+DEFAULT_EVENING_CONSUMPTION_MULTIPLIER = 1.5
+DEFAULT_NIGHT_CONSUMPTION_MULTIPLIER = 0.5
+DEFAULT_WEEKEND_CONSUMPTION_MULTIPLIER = 1.0
+
 # Defaults
 DEFAULT_INVERTER_TEMPLATE = "custom"
 DEFAULT_BATTERY_CAPACITY = 15.0
@@ -69,18 +81,59 @@ FORECAST_ERROR_WINDOW_DAYS = 7
 # Charge history
 CHARGE_HISTORY_DAYS = 7
 
+# Stall detection (Fix 3)
+STALL_RETRY_TICKS = 8   # 16 min at 2-min ticks — retry charge command
+STALL_ABORT_TICKS = 16  # 32 min — abort charging and alert
+
+# Planner magic numbers (Fix 12)
+PV_RAMP_BUFFER_HOURS = 2.0       # Hours after sunrise before PV covers consumption
+PV_FALLBACK_BUFFER_HOURS = 3.0   # Hours after window_end when no sun data available
+MAX_OVERNIGHT_HOURS = 14          # Max simulation horizon
+MORNING_SAFETY_OFFSET_MINUTES = 15  # Minutes before sunrise for morning safety
+
+# Wattsonic / EMS power control entities
+CONF_INVERTER_WORKING_MODE_NUMBER = "inverter_working_mode_number"
+CONF_INVERTER_BATTERY_POWER_NUMBER = "inverter_battery_power_number"
+CONF_INVERTER_AC_LOWER_LIMIT_NUMBER = "inverter_ac_lower_limit_number"
+CONF_INVERTER_BATTERY_DOD_NUMBER = "inverter_battery_dod_number"
+
+# EMS mode values (written as raw integers to working mode register)
+CONF_EMS_CHARGE_MODE_VALUE = "ems_charge_mode_value"
+CONF_EMS_NORMAL_MODE_VALUE = "ems_normal_mode_value"
+
+# Control type
+CONF_CONTROL_TYPE = "control_type"
+CONTROL_TYPE_SELECT = "select"
+CONTROL_TYPE_EMS_POWER = "ems_power"
+
+# Emergency SOC threshold — below this, price threshold is bypassed (M2)
+EMERGENCY_SOC_THRESHOLD = 25.0
+
+# Modbus call timeout in seconds (C2)
+MODBUS_CALL_TIMEOUT = 30
+
+# Start failure retry limit (C3)
+START_FAILURE_MAX_RETRIES = 3
+
+# Sensor health monitoring (H1)
+CONF_NOTIFY_SENSOR_UNAVAILABLE = "notify_sensor_unavailable"
+DEFAULT_NOTIFY_SENSOR_UNAVAILABLE = True
+SENSOR_UNAVAILABLE_TICKS = 5  # ~2.5 min at 30s update interval
+
 # Notifications
 CONF_NOTIFICATION_SERVICE = "notification_service"
 CONF_NOTIFY_PLANNING = "notify_planning"
 CONF_NOTIFY_CHARGING_START = "notify_charging_start"
 CONF_NOTIFY_CHARGING_COMPLETE = "notify_charging_complete"
 CONF_NOTIFY_MORNING_SAFETY = "notify_morning_safety"
+CONF_NOTIFY_CHARGING_STALLED = "notify_charging_stalled"
 
 DEFAULT_NOTIFICATION_SERVICE = ""
 DEFAULT_NOTIFY_PLANNING = True
 DEFAULT_NOTIFY_CHARGING_START = True
 DEFAULT_NOTIFY_CHARGING_COMPLETE = True
 DEFAULT_NOTIFY_MORNING_SAFETY = True
+DEFAULT_NOTIFY_CHARGING_STALLED = True
 
 # Platforms
 PLATFORMS = ["sensor", "binary_sensor", "number", "switch"]
