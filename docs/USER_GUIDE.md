@@ -328,7 +328,7 @@ The integration tracks how accurate the Forecast.Solar predictions are by compar
 
 - **Error metric**: `(forecast − actual) / forecast` — a ratio, not absolute kWh
 - **Window**: 7-day sliding average
-- **Direction**: Only corrects **downward** when forecasts overestimate (common in winter). Underestimates (common in summer) are left uncorrected — better to have extra charge than not enough.
+- **Direction**: Bidirectional. Overestimates (common in winter) reduce the forecast so more grid charging is scheduled. Underestimates (common in summer) increase the forecast so less grid charging is scheduled, avoiding wasted money on unnecessary charges.
 
 Example: If the 7-day average error is 40% (forecasts overestimate by 40%), a 10 kWh forecast becomes `10 × (1 − 0.4) = 6 kWh` for planning purposes.
 

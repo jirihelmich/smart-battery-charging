@@ -93,20 +93,28 @@ class TestAdjustForecast:
         adjusted = forecast_corrector.adjust_forecast(10.0, history)
         assert adjusted == pytest.approx(5.8)
 
-    def test_underestimate_no_change(self, forecast_corrector: ForecastCorrector):
-        # Negative error (underestimate) → don't increase forecast
+    def test_underestimate_increases_forecast(self, forecast_corrector: ForecastCorrector):
+        # Negative error (underestimate) → increase forecast to avoid overcharging
+        # -0.3 error means forecast underestimates by 30% → adjust up by 30%
         history = [-0.3]
         adjusted = forecast_corrector.adjust_forecast(10.0, history)
-        assert adjusted == 10.0
+        assert adjusted == pytest.approx(13.0)
 
     def test_no_history(self, forecast_corrector: ForecastCorrector):
         adjusted = forecast_corrector.adjust_forecast(10.0, [])
         assert adjusted == 10.0
 
     def test_mixed_history(self, forecast_corrector: ForecastCorrector):
-        # Mix of over and underestimates — net positive
+        # Mix of over and underestimates — net positive (~0.186 overestimate)
         history = [0.4, -0.1, 0.3, 0.5, -0.2, 0.3, 0.1]
         avg = sum(history) / len(history)  # ~0.186
         adjusted = forecast_corrector.adjust_forecast(10.0, history)
-        expected = 10.0 * (1 - max(0, avg))
+        expected = 10.0 * (1 - avg)
         assert adjusted == pytest.approx(expected, abs=0.1)
+
+    def test_adjusted_never_negative(self, forecast_corrector: ForecastCorrector):
+        # Extreme overestimate (>100%) should floor at 0, not go negative
+        history = [1.5]  # forecast overestimates by 150%
+        adjusted = forecast_corrector.adjust_forecast(5.0, history)
+        # 5 * (1 - 1.5) = -2.5 → clamped to 0
+        assert adjusted == 0.0

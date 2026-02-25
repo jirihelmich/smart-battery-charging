@@ -69,17 +69,16 @@ class ForecastCorrector:
     def adjust_forecast(self, forecast_kwh: float, history: list[float]) -> float:
         """Adjust a solar forecast based on historical error.
 
-        Only reduces forecast when historical error is positive (overestimate).
-        When forecast underestimates (negative error), returns original value.
+        Bidirectional correction:
+        - Positive avg error (overestimate) → reduce forecast → charge more
+        - Negative avg error (underestimate) → increase forecast → charge less
 
         Args:
             forecast_kwh: Raw forecast value.
             history: Error history list.
 
         Returns:
-            Adjusted forecast value.
+            Adjusted forecast value (never negative).
         """
         avg_error = self.average_error(history)
-        # Only correct downward (for overestimates)
-        correction = max(0.0, avg_error)
-        return round(forecast_kwh * (1 - correction), 2)
+        return max(0.0, round(forecast_kwh * (1 - avg_error), 2))
