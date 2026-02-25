@@ -109,8 +109,13 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def battery_capacity(self) -> float:
-        """Battery capacity in kWh. Reads from BMS sensor, falls back to manual setting."""
+        """Battery capacity in kWh. Reads from BMS sensor, falls back to config setting."""
         return self.inverter_capacity_kwh
+
+    @property
+    def _configured_battery_capacity(self) -> float:
+        """Battery capacity from config (fallback when BMS unavailable)."""
+        return float(self._opt(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))
 
     @property
     def max_charge_level(self) -> float:
@@ -194,14 +199,14 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def inverter_capacity_kwh(self) -> float:
-        """Battery capacity from inverter BMS (Wh → kWh)."""
+        """Battery capacity from inverter BMS (Wh → kWh), falls back to config."""
         raw = self._get_state_float(
             self.entry.data.get(CONF_INVERTER_CAPACITY_SENSOR, ""), 0
         )
         # BMS reports in Wh, convert to kWh
         if raw > 1000:
             return raw / 1000
-        return raw if raw > 0 else self.battery_capacity
+        return raw if raw > 0 else self._configured_battery_capacity
 
     @property
     def actual_solar_today(self) -> float:

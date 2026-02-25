@@ -131,7 +131,7 @@ Example: `sensor.solax_energy_dashboard_solax_home_consumption_energy`
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Battery capacity | 15.0 kWh | Total battery capacity (auto-detected from BMS if available) |
+| Battery capacity | 15.0 kWh | Fallback value — only used if BMS sensor is unavailable (capacity is normally read from your inverter's BMS automatically) |
 | Max charge level | 90% | Don't charge above this SOC |
 | Min SOC | 20% | Don't discharge below this SOC |
 | Max charge power | 10.0 kW | Maximum grid charge rate |
