@@ -396,3 +396,392 @@ views:
               - entity: sensor.smart_battery_charging_battery_charge_kwh
               - entity: sensor.solax_inverter_battery_capacity
     max_columns: 3
+  - type: sections
+    title: Analytics
+    cards: []
+    max_columns: 4
+    sections:
+      # ── Row 1: Solar Accuracy ──────────────────────────────────────────
+      - type: grid
+        cards:
+          # Forecast vs Actual Solar — how accurate are predictions?
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: "Solar: Forecast vs Actual"
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: 0
+                apex_config:
+                  title:
+                    text: kWh
+            series:
+              - entity: sensor.smart_battery_charging_today_solar_forecast
+                name: Forecast
+                type: line
+                color: "#ff9800"
+                stroke_width: 2
+                yaxis_id: kwh
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+              - entity: sensor.solax_inverter_today_s_solar_energy
+                name: Actual
+                type: line
+                color: "#4caf50"
+                stroke_width: 2
+                yaxis_id: kwh
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+          # Forecast Error Trend — is the correction working?
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Forecast Error Trend
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            yaxis:
+              - id: pct
+                apex_config:
+                  title:
+                    text: "%"
+                  labels:
+                    formatter: |
+                      EVAL:function(val) { return val.toFixed(0) + '%'; }
+            series:
+              - entity: sensor.smart_battery_charging_today_solar_forecast_error
+                name: Daily Error
+                type: column
+                color: "#ff9800"
+                yaxis_id: pct
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+              - entity: sensor.smart_battery_charging_solar_forecast_error_average
+                name: 7d Average
+                type: line
+                color: "#f44336"
+                stroke_width: 2
+                yaxis_id: pct
+                group_by:
+                  func: avg
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+      # ── Row 2: Energy Balance ──────────────────────────────────────────
+      - type: grid
+        cards:
+          # Daily Energy Balance — consumption vs solar vs grid charge
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Daily Energy Balance
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: 0
+                apex_config:
+                  title:
+                    text: kWh
+            apex_config:
+              chart:
+                stacked: false
+              plotOptions:
+                bar:
+                  columnWidth: "60%"
+            series:
+              - entity: sensor.smart_battery_charging_average_daily_consumption
+                name: Consumption
+                type: column
+                color: "#f44336"
+                yaxis_id: kwh
+                show:
+                  in_header: raw
+                data_generator: >
+                  const h = entity.attributes.history;
+                  if (!h || !Array.isArray(h) || h.length === 0) return [];
+                  const now = new Date();
+                  return h.map((v, i) => {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - 1 - i);
+                    d.setHours(12, 0, 0, 0);
+                    return [d.getTime(), v];
+                  }).reverse();
+              - entity: sensor.smart_battery_charging_last_night_charge_kwh
+                name: Grid Charge
+                type: column
+                color: "#9c27b0"
+                yaxis_id: kwh
+                show:
+                  in_header: raw
+                data_generator: >
+                  const h = entity.attributes.history;
+                  if (!h || !Array.isArray(h) || h.length === 0) return [];
+                  const now = new Date();
+                  return h.map((v, i) => {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - 1 - i);
+                    d.setHours(12, 0, 0, 0);
+                    return [d.getTime(), v];
+                  }).reverse();
+              - entity: sensor.solax_inverter_today_s_solar_energy
+                name: Solar Actual
+                type: column
+                color: "#ff9800"
+                yaxis_id: kwh
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+          # Charging Cost per Night
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Nightly Charging Cost
+              show_states: true
+              colorize_states: true
+            graph_span: 14d
+            span:
+              end: day
+            yaxis:
+              - id: cost
+                min: 0
+                apex_config:
+                  title:
+                    text: cost
+            series:
+              - entity: sensor.smart_battery_charging_last_charge_total_cost
+                name: Cost
+                type: column
+                color: "#e91e63"
+                yaxis_id: cost
+                float_precision: 1
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+      # ── Row 3: Battery & Price ─────────────────────────────────────────
+      - type: grid
+        cards:
+          # Battery SOC with Charging Windows
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Battery SOC (48h)
+              show_states: true
+              colorize_states: true
+            graph_span: 48h
+            yaxis:
+              - id: soc
+                min: 0
+                max: 100
+                apex_config:
+                  title:
+                    text: SOC %
+              - id: active
+                min: 0
+                max: 1
+                show: false
+            now:
+              show: true
+              label: Now
+            series:
+              - entity: sensor.solax_inverter_battery_capacity
+                name: Battery SOC
+                type: area
+                color: "#4caf50"
+                yaxis_id: soc
+                stroke_width: 2
+                opacity: 0.15
+                show:
+                  in_header: raw
+              - entity: binary_sensor.smart_battery_charging_charging_active
+                name: Charging
+                type: area
+                color: "#9c27b0"
+                yaxis_id: active
+                stroke_width: 0
+                opacity: 0.2
+                transform: "return x === 'on' ? 1 : 0;"
+                show:
+                  in_header: false
+                  legend_value: false
+            apex_config:
+              annotations:
+                yaxis:
+                  - y: 20
+                    yAxisIndex: 0
+                    borderColor: "#f44336"
+                    strokeDashArray: 4
+                    label:
+                      text: Min SOC
+                      style:
+                        color: "#f44336"
+                        background: "transparent"
+            grid_options:
+              columns: 12
+
+          # Electricity Price with Charge Overlay (48h)
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Price & Charging (48h)
+              show_states: true
+              colorize_states: true
+            graph_span: 48h
+            yaxis:
+              - id: price
+                min: ~0
+                apex_config:
+                  title:
+                    text: Price
+              - id: active
+                min: 0
+                max: 1
+                show: false
+            now:
+              show: true
+              label: Now
+            series:
+              - entity: sensor.current_spot_electricity_price
+                name: Price
+                type: column
+                color: "#2196f3"
+                yaxis_id: price
+                float_precision: 2
+                show:
+                  in_header: raw
+              - entity: binary_sensor.smart_battery_charging_charging_active
+                name: Charging
+                type: area
+                color: "#4caf50"
+                yaxis_id: active
+                stroke_width: 0
+                opacity: 0.25
+                transform: "return x === 'on' ? 1 : 0;"
+                show:
+                  in_header: false
+                  legend_value: false
+            apex_config:
+              annotations:
+                yaxis:
+                  - y: 4
+                    yAxisIndex: 0
+                    borderColor: "#ff9800"
+                    strokeDashArray: 4
+                    label:
+                      text: Price Threshold
+                      style:
+                        color: "#ff9800"
+                        background: "transparent"
+            grid_options:
+              columns: 12
+
+      # ── Row 4: Long-term Trends ────────────────────────────────────────
+      - type: grid
+        cards:
+          # Grid Charging (30 days)
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Grid Charging (30d)
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: 0
+                apex_config:
+                  title:
+                    text: kWh
+            series:
+              - entity: sensor.smart_battery_charging_last_night_charge_kwh
+                name: Nightly Charge
+                type: column
+                color: "#9c27b0"
+                yaxis_id: kwh
+                float_precision: 1
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+
+          # Consumption Trend (30 days)
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Daily Consumption (30d)
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: 0
+                apex_config:
+                  title:
+                    text: kWh
+            series:
+              - entity: sensor.solax_energy_dashboard_solax_home_consumption_energy
+                name: Consumption
+                type: column
+                color: "#2196f3"
+                yaxis_id: kwh
+                float_precision: 1
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+              - entity: sensor.smart_battery_charging_average_daily_consumption
+                name: 7d Average
+                type: line
+                color: "#f44336"
+                stroke_width: 2
+                yaxis_id: kwh
+                group_by:
+                  func: avg
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
