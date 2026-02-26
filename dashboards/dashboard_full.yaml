@@ -635,8 +635,13 @@ views:
                 color: "#9c27b0"
                 yaxis_id: active
                 stroke_width: 0
-                opacity: 0.2
+                opacity: 0.3
                 transform: "return x === 'on' ? 1 : 0;"
+                extend_to: end
+                group_by:
+                  func: last
+                  duration: 5min
+                  fill: last
                 show:
                   in_header: false
                   legend_value: false
@@ -692,8 +697,13 @@ views:
                 color: "#4caf50"
                 yaxis_id: active
                 stroke_width: 0
-                opacity: 0.25
+                opacity: 0.3
                 transform: "return x === 'on' ? 1 : 0;"
+                extend_to: end
+                group_by:
+                  func: last
+                  duration: 5min
+                  fill: last
                 show:
                   in_header: false
                   legend_value: false
@@ -787,3 +797,140 @@ views:
                   in_header: raw
             grid_options:
               columns: 12
+
+      # ── Row 5: Self-Consumption & Grid ───────────────────────────────────
+      - type: grid
+        cards:
+          - type: gauge
+            entity: sensor.smart_battery_charging_self_consumption_ratio
+            name: Self Consumption
+            unit: '%'
+            needle: true
+            min: 0
+            max: 100
+            segments:
+              - from: 0
+                color: '#e53935'
+              - from: 30
+                color: '#fb8c00'
+              - from: 60
+                color: '#fdd835'
+              - from: 80
+                color: '#8bc34a'
+              - from: 90
+                color: '#43a047'
+          - type: gauge
+            entity: sensor.smart_battery_charging_grid_dependency
+            name: Grid Dependency
+            unit: '%'
+            needle: true
+            min: 0
+            max: 100
+            segments:
+              - from: 0
+                color: '#43a047'
+              - from: 20
+                color: '#8bc34a'
+              - from: 40
+                color: '#fdd835'
+              - from: 60
+                color: '#fb8c00'
+              - from: 80
+                color: '#e53935'
+
+      # ── Row 6: Charging Analytics ────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: glance
+            title: Charging Analytics
+            columns: 3
+            show_state: true
+            show_name: true
+            entities:
+              - entity: sensor.smart_battery_charging_morning_soc
+                name: Morning SOC
+                icon: mdi:battery-clock
+              - entity: sensor.smart_battery_charging_planned_vs_actual_charge
+                name: Actual Charge
+                icon: mdi:chart-bar
+              - entity: sensor.smart_battery_charging_weekly_charging_cost
+                name: Weekly Cost
+              - entity: sensor.smart_battery_charging_charging_savings
+                name: Weekly Savings
+              - entity: sensor.smart_battery_charging_bms_battery_capacity
+                name: BMS Capacity
+
+      # ── Row 7a: BMS Capacity Trend ───────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: BMS Battery Capacity
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                apex_config:
+                  title:
+                    text: kWh
+            series:
+              - entity: sensor.smart_battery_charging_bms_battery_capacity
+                name: Capacity
+                type: line
+                color: "#9c27b0"
+                stroke_width: 2
+                yaxis_id: kwh
+                float_precision: 2
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+
+      # ── Row 7b: Charging Cost & Savings Trend ──────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Charging Cost & Savings (30d)
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: cost
+                min: 0
+                apex_config:
+                  title:
+                    text: cost
+            series:
+              - entity: sensor.smart_battery_charging_weekly_charging_cost
+                name: Weekly Cost
+                type: line
+                color: "#e91e63"
+                stroke_width: 2
+                yaxis_id: cost
+                float_precision: 1
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+              - entity: sensor.smart_battery_charging_charging_savings
+                name: Weekly Savings
+                type: line
+                color: "#4caf50"
+                stroke_width: 2
+                yaxis_id: cost
+                float_precision: 1
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
