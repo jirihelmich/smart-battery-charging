@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 # Mock HA modules before importing
+_DAYTIME = datetime(2026, 2, 26, 15, 0, 0)  # 15:00 — daytime for tests
+
 for mod_name in [
     "homeassistant",
     "homeassistant.core",
@@ -26,6 +28,8 @@ for mod_name in [
     "homeassistant.components.binary_sensor",
     "homeassistant.components.number",
     "homeassistant.data_entry_flow",
+    "homeassistant.util",
+    "homeassistant.util.dt",
     "voluptuous",
 ]:
     sys.modules.setdefault(mod_name, MagicMock())
@@ -38,7 +42,15 @@ from smart_battery_charging.models import (
     ChargingSession,
     EnergyDeficit,
 )
+from smart_battery_charging import notifier as _notifier_mod
 from smart_battery_charging.notifier import ChargingNotifier
+
+
+@pytest.fixture(autouse=True)
+def _patch_dt_util_now():
+    """Ensure dt_util.now() returns daytime for all tests by default."""
+    with patch.object(_notifier_mod.dt_util, "now", return_value=_DAYTIME):
+        yield
 
 
 def _make_deficit(
@@ -406,6 +418,39 @@ class TestDeduplication:
         await notifier.async_notify_plan(None, deficit)
 
         assert hass.services.async_call.call_count == 1
+
+
+class TestOvernightSuppression:
+    """Test that plan notifications are suppressed during overnight hours."""
+
+    @pytest.mark.asyncio
+    async def test_suppressed_at_2am(self, _patch_dt_util_now):
+        hass = _make_hass()
+        coord = _make_coordinator()
+        n = ChargingNotifier(hass, coord)
+
+        with patch.object(_notifier_mod.dt_util, "now", return_value=datetime(2026, 2, 26, 2, 0, 0)):
+            await n.async_notify_plan(_make_schedule(), _make_deficit())
+        hass.services.async_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_suppressed_at_23pm(self, _patch_dt_util_now):
+        hass = _make_hass()
+        coord = _make_coordinator()
+        n = ChargingNotifier(hass, coord)
+
+        with patch.object(_notifier_mod.dt_util, "now", return_value=datetime(2026, 2, 26, 23, 0, 0)):
+            await n.async_notify_plan(_make_schedule(), _make_deficit())
+        hass.services.async_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_not_suppressed_at_15pm(self):
+        hass = _make_hass()
+        coord = _make_coordinator()
+        n = ChargingNotifier(hass, coord)
+
+        await n.async_notify_plan(_make_schedule(), _make_deficit())
+        hass.services.async_call.assert_called_once()
 
 
 class TestServiceError:

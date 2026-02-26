@@ -155,6 +155,9 @@ def _register_event_listeners(
         if not coordinator.enabled:
             _LOGGER.debug("Skipping planner — charging disabled")
             return
+        if not coordinator.sensors_ready:
+            _LOGGER.debug("Skipping planner — sensors not ready yet (startup)")
+            return
         try:
             now = dt_util.now()
             deficit = planner.compute_energy_deficit(now=now)
@@ -184,11 +187,19 @@ def _register_event_listeners(
         except Exception:
             _LOGGER.exception("Error in morning safety handler")
 
+    async def _on_morning_soc(_now=None) -> None:
+        """Record battery SOC at sunrise."""
+        try:
+            await coordinator.async_record_morning_soc()
+        except Exception:
+            _LOGGER.exception("Error recording morning SOC")
+
     async def _on_daily_record(_now=None) -> None:
-        """Record daily consumption and forecast error at 23:55."""
+        """Record daily consumption, forecast error, and BMS capacity at 23:55."""
         try:
             await coordinator.async_record_daily_consumption()
             await coordinator.async_record_forecast_error()
+            await coordinator.async_record_bms_capacity()
         except Exception:
             _LOGGER.exception("Error recording daily data")
 
@@ -212,11 +223,15 @@ def _register_event_listeners(
     unsub = async_track_sunrise(hass, _on_morning_safety, offset=timedelta(minutes=-MORNING_SAFETY_OFFSET_MINUTES))
     entry.async_on_unload(unsub)
 
-    # 5. 23:55 → daily consumption + forecast error recorder
+    # 5. 23:55 → daily consumption + forecast error + BMS capacity recorder
     unsub = async_track_time_change(hass, _on_daily_record, hour=23, minute=55, second=0)
     entry.async_on_unload(unsub)
 
-    _LOGGER.debug("Registered 5 event listeners for charging automation")
+    # 6. Sunrise → morning SOC recorder
+    unsub = async_track_sunrise(hass, _on_morning_soc, offset=timedelta(minutes=0))
+    entry.async_on_unload(unsub)
+
+    _LOGGER.debug("Registered 6 event listeners for charging automation")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

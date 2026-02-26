@@ -80,6 +80,7 @@ class TestDefaultData:
         expected_keys = {
             "consumption_history", "charge_history", "forecast_error_history",
             "last_session", "enabled", "charging_state", "current_schedule",
+            "morning_soc_history", "session_cost_history", "bms_capacity_history",
         }
         data = {
             "consumption_history": [],
@@ -89,8 +90,14 @@ class TestDefaultData:
             "enabled": True,
             "charging_state": "idle",
             "current_schedule": None,
+            "morning_soc_history": [],
+            "session_cost_history": [],
+            "bms_capacity_history": [],
         }
         assert set(data.keys()) == expected_keys
         assert data["enabled"] is True
         assert data["charging_state"] == "idle"
         assert data["current_schedule"] is None
+        assert data["morning_soc_history"] == []
+        assert data["session_cost_history"] == []
+        assert data["bms_capacity_history"] == []

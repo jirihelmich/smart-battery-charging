@@ -12,7 +12,15 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import CHARGE_HISTORY_DAYS, CONSUMPTION_WINDOW_DAYS, DOMAIN, FORECAST_ERROR_WINDOW_DAYS
+from .const import (
+    BMS_CAPACITY_HISTORY_DAYS,
+    CHARGE_HISTORY_DAYS,
+    CONSUMPTION_WINDOW_DAYS,
+    DOMAIN,
+    FORECAST_ERROR_WINDOW_DAYS,
+    MORNING_SOC_HISTORY_DAYS,
+    SESSION_COST_HISTORY_DAYS,
+)
 from .models import ChargingSession
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,6 +39,9 @@ def _default_data() -> dict[str, Any]:
         "enabled": True,
         "charging_state": "idle",
         "current_schedule": None,
+        "morning_soc_history": [],
+        "session_cost_history": [],
+        "bms_capacity_history": [],
     }
 
 
@@ -157,6 +168,42 @@ class SmartBatteryStore:
     async def async_set_current_schedule(self, schedule_dict: dict[str, Any] | None) -> None:
         """Set the current schedule dict and persist."""
         self._data["current_schedule"] = schedule_dict
+        await self.async_save()
+
+    # --- Morning SOC History ---
+
+    @property
+    def morning_soc_history(self) -> list[dict]:
+        """Return morning SOC history (most recent first)."""
+        return list(self._data.get("morning_soc_history", []))
+
+    async def async_set_morning_soc_history(self, history: list[dict]) -> None:
+        """Set the morning SOC history and persist."""
+        self._data["morning_soc_history"] = history[:MORNING_SOC_HISTORY_DAYS]
+        await self.async_save()
+
+    # --- Session Cost History ---
+
+    @property
+    def session_cost_history(self) -> list[dict]:
+        """Return session cost history (most recent first)."""
+        return list(self._data.get("session_cost_history", []))
+
+    async def async_set_session_cost_history(self, history: list[dict]) -> None:
+        """Set the session cost history and persist."""
+        self._data["session_cost_history"] = history[:SESSION_COST_HISTORY_DAYS]
+        await self.async_save()
+
+    # --- BMS Capacity History ---
+
+    @property
+    def bms_capacity_history(self) -> list[dict]:
+        """Return BMS capacity history (most recent first)."""
+        return list(self._data.get("bms_capacity_history", []))
+
+    async def async_set_bms_capacity_history(self, history: list[dict]) -> None:
+        """Set the BMS capacity history and persist."""
+        self._data["bms_capacity_history"] = history[:BMS_CAPACITY_HISTORY_DAYS]
         await self.async_save()
 
     async def async_remove(self) -> None:

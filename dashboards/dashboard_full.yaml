@@ -631,6 +631,7 @@ views:
               - entity: binary_sensor.smart_battery_charging_charging_active
                 name: Charging
                 type: area
+                curve: stepline
                 color: "#9c27b0"
                 yaxis_id: active
                 stroke_width: 0
@@ -687,6 +688,7 @@ views:
               - entity: binary_sensor.smart_battery_charging_charging_active
                 name: Charging
                 type: area
+                curve: stepline
                 color: "#4caf50"
                 yaxis_id: active
                 stroke_width: 0

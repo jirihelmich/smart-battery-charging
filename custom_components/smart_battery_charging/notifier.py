@@ -83,10 +83,14 @@ class ChargingNotifier:
         deficit: EnergyDeficit,
         overnight: OvernightNeed | None = None,
     ) -> str:
-        """Compute a hash of the plan for deduplication."""
-        overnight_key = f":{overnight.charge_needed:.1f}" if overnight else ""
+        """Compute a hash of the plan for deduplication.
+
+        Uses only stable values (charge_needed, schedule params) — NOT raw
+        deficit which fluctuates as solar tracking updates.
+        """
+        overnight_key = f":{overnight.charge_needed:.0f}" if overnight else ""
         if schedule is None:
-            key = f"no_schedule:{deficit.charge_needed:.1f}:{deficit.deficit:.1f}{overnight_key}"
+            key = f"no_schedule:{deficit.charge_needed:.0f}{overnight_key}"
         else:
             key = (
                 f"{schedule.start_hour}:{schedule.end_hour}:"
@@ -102,7 +106,7 @@ class ChargingNotifier:
         overnight: OvernightNeed | None = None,
     ) -> bool:
         """Check if this plan is the same as the last one sent today."""
-        today = date.today()
+        today = dt_util.now().date()
         plan_hash = self._compute_plan_hash(schedule, deficit, overnight)
 
         if self._last_plan_date == today and self._last_plan_hash == plan_hash:
@@ -121,6 +125,15 @@ class ChargingNotifier:
         """Send planning notification (3 variants: scheduled, not scheduled, not needed)."""
         if not self._is_enabled(CONF_NOTIFY_PLANNING, DEFAULT_NOTIFY_PLANNING):
             return
+
+        # Suppress plan notifications during overnight hours (22:00-06:00).
+        # The plan is decided in the evening; re-notifying every hour overnight
+        # when the price sensor updates is spam.
+        hour = dt_util.now().hour
+        if hour >= 22 or hour < 6:
+            _LOGGER.debug("Skipping plan notification during overnight hours (%02d:00)", hour)
+            return
+
         if self._is_duplicate_plan(schedule, deficit, overnight):
             _LOGGER.debug("Skipping duplicate plan notification")
             return

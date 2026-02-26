@@ -29,6 +29,11 @@ CONF_SOLAR_FORECAST_TOMORROW = "solar_forecast_tomorrow"
 # Consumption
 CONF_CONSUMPTION_SENSOR = "consumption_sensor"
 
+# Analytics sensors (optional)
+CONF_GRID_IMPORT_SENSOR = "grid_import_sensor"
+CONF_GRID_EXPORT_SENSOR = "grid_export_sensor"
+CONF_DAILY_SOLAR_SENSOR = "daily_solar_sensor"
+
 # Settings (also exposed as number entities)
 CONF_BATTERY_CAPACITY = "battery_capacity"
 CONF_MAX_CHARGE_LEVEL = "max_charge_level"
@@ -81,14 +86,17 @@ FORECAST_ERROR_WINDOW_DAYS = 7
 # Charge history
 CHARGE_HISTORY_DAYS = 7
 
+# Analytics history retention
+MORNING_SOC_HISTORY_DAYS = 30
+SESSION_COST_HISTORY_DAYS = 90
+BMS_CAPACITY_HISTORY_DAYS = 365
+
 # Stall detection (Fix 3)
 STALL_RETRY_TICKS = 8   # 16 min at 2-min ticks — retry charge command
 STALL_ABORT_TICKS = 16  # 32 min — abort charging and alert
 
 # Planner magic numbers (Fix 12)
-PV_RAMP_BUFFER_HOURS = 2.0       # Hours after sunrise before PV covers consumption
 PV_FALLBACK_BUFFER_HOURS = 3.0   # Hours after window_end when no sun data available
-MAX_OVERNIGHT_HOURS = 14          # Max simulation horizon
 MORNING_SAFETY_OFFSET_MINUTES = 15  # Minutes before sunrise for morning safety
 
 # Wattsonic / EMS power control entities

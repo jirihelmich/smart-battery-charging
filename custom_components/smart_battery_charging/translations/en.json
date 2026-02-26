@@ -67,6 +67,15 @@
           "consumption_sensor": "Daily consumption sensor"
         }
       },
+      "analytics": {
+        "title": "Analytics Sensors (Optional)",
+        "description": "Select sensors for self-consumption and grid analytics. Leave empty to skip.",
+        "data": {
+          "grid_import_sensor": "Daily grid import sensor (kWh, resets at midnight)",
+          "grid_export_sensor": "Daily grid export sensor (kWh, resets at midnight)",
+          "daily_solar_sensor": "Daily solar production sensor (kWh, resets at midnight)"
+        }
+      },
       "settings": {
         "title": "Charging Settings",
         "description": "Configure battery and charging parameters.",
@@ -102,6 +111,9 @@
           "window_start_hour": "Charging window start hour",
           "window_end_hour": "Charging window end hour",
           "currency": "Price unit (e.g. Kč/kWh)",
+          "grid_import_sensor": "Daily grid import sensor",
+          "grid_export_sensor": "Daily grid export sensor",
+          "daily_solar_sensor": "Daily solar production sensor",
           "notification_service": "Notification service name (e.g. mobile_app_phone, leave empty to disable)",
           "notify_planning": "Notify: Charging plan",
           "notify_charging_start": "Notify: Charging started",
@@ -134,7 +146,14 @@
       "last_charge_total_cost": { "name": "Last Charge Total Cost" },
       "electricity_price_status": { "name": "Electricity Price Status" },
       "today_cheapest_hours": { "name": "Today Cheapest Hours" },
-      "tomorrow_cheapest_hours": { "name": "Tomorrow Cheapest Hours" }
+      "tomorrow_cheapest_hours": { "name": "Tomorrow Cheapest Hours" },
+      "self_consumption_ratio": { "name": "Self Consumption Ratio" },
+      "grid_dependency": { "name": "Grid Dependency" },
+      "morning_soc": { "name": "Morning SOC" },
+      "planned_vs_actual_charge": { "name": "Planned vs Actual Charge" },
+      "weekly_charging_cost": { "name": "Weekly Charging Cost" },
+      "charging_savings": { "name": "Charging Savings" },
+      "bms_battery_capacity": { "name": "BMS Battery Capacity" }
     },
     "binary_sensor": {
       "charging_active": { "name": "Charging Active" },

@@ -79,3 +79,30 @@ class OvernightNeed:
     charge_needed: float  # max(0, overnight_consumption - battery), clamped
     solar_start_hour: float  # Hour when PV covers consumption
     source: str  # "forecast_solar" or "sun_entity" or "fallback"
+
+
+@dataclass
+class TrajectoryResult:
+    """Result of the hour-by-hour SOC trajectory simulation."""
+
+    charge_needed_kwh: float  # net deficit below min_soc (after efficiency)
+    min_soc_kwh: float  # deepest SOC reached in simulation
+    min_soc_hour: int  # clock hour when deepest point occurs
+
+    # Backward-compat: daily energy balance (for EnergyDeficit sensor)
+    daily_deficit_kwh: float  # consumption_tomorrow - solar_adjusted_tomorrow (>= 0)
+    daily_charge_kwh: float  # daily_deficit clamped to usable capacity / efficiency
+
+    # Backward-compat: overnight data (for OvernightNeed / sensor attributes)
+    battery_at_window_start_kwh: float  # projected SOC at window_start
+    dark_hours: float  # hours from window_start to solar coverage
+    overnight_consumption_kwh: float  # drain from window_start to solar start
+    solar_start_hour: float
+    solar_source: str
+
+    # Summary data (for sensor display)
+    tomorrow_consumption: float
+    tomorrow_solar_raw: float
+    tomorrow_solar_adjusted: float
+    forecast_error_pct: float
+    usable_capacity_kwh: float

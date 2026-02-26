@@ -18,11 +18,14 @@ from .const import (
     CONF_CHARGING_EFFICIENCY,
     CONF_CONSUMPTION_SENSOR,
     CONF_CONTROL_TYPE,
+    CONF_DAILY_SOLAR_SENSOR,
     CONF_CURRENCY,
     CONF_EMS_CHARGE_MODE_VALUE,
     CONF_EMS_NORMAL_MODE_VALUE,
     CONF_EVENING_CONSUMPTION_MULTIPLIER,
     CONF_FALLBACK_CONSUMPTION,
+    CONF_GRID_EXPORT_SENSOR,
+    CONF_GRID_IMPORT_SENSOR,
     CONF_INVERTER_AC_LOWER_LIMIT_NUMBER,
     CONF_INVERTER_ACTUAL_SOLAR_SENSOR,
     CONF_INVERTER_BATTERY_DOD_NUMBER,
@@ -334,13 +337,32 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step 7: Daily consumption sensor."""
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_settings()
+            return await self.async_step_analytics()
 
         return self.async_show_form(
             step_id="consumption",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_CONSUMPTION_SENSOR): _entity_selector("sensor"),
+                }
+            ),
+        )
+
+    async def async_step_analytics(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Step 7b: Optional analytics sensors (grid import/export/solar)."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_settings()
+
+        return self.async_show_form(
+            step_id="analytics",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_GRID_IMPORT_SENSOR): _entity_selector("sensor"),
+                    vol.Optional(CONF_GRID_EXPORT_SENSOR): _entity_selector("sensor"),
+                    vol.Optional(CONF_DAILY_SOLAR_SENSOR): _entity_selector("sensor"),
                 }
             ),
         )
@@ -484,6 +506,19 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                         CONF_CURRENCY,
                         default=current.get(CONF_CURRENCY, DEFAULT_CURRENCY),
                     ): str,
+                    # Analytics sensors (optional)
+                    vol.Optional(
+                        CONF_GRID_IMPORT_SENSOR,
+                        default=current.get(CONF_GRID_IMPORT_SENSOR, ""),
+                    ): _entity_selector("sensor"),
+                    vol.Optional(
+                        CONF_GRID_EXPORT_SENSOR,
+                        default=current.get(CONF_GRID_EXPORT_SENSOR, ""),
+                    ): _entity_selector("sensor"),
+                    vol.Optional(
+                        CONF_DAILY_SOLAR_SENSOR,
+                        default=current.get(CONF_DAILY_SOLAR_SENSOR, ""),
+                    ): _entity_selector("sensor"),
                     # Advanced: Efficiency & Consumption Profiles
                     vol.Optional(
                         CONF_CHARGING_EFFICIENCY,

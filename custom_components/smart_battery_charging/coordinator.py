@@ -21,12 +21,16 @@ if TYPE_CHECKING:
     from .planner import ChargingPlanner
 
 from .const import (
+    BMS_CAPACITY_HISTORY_DAYS,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGING_EFFICIENCY,
     CONF_CONSUMPTION_SENSOR,
     CONF_CURRENCY,
+    CONF_DAILY_SOLAR_SENSOR,
     CONF_EVENING_CONSUMPTION_MULTIPLIER,
     CONF_FALLBACK_CONSUMPTION,
+    CONF_GRID_EXPORT_SENSOR,
+    CONF_GRID_IMPORT_SENSOR,
     CONF_INVERTER_ACTUAL_SOLAR_SENSOR,
     CONF_INVERTER_CAPACITY_SENSOR,
     CONF_INVERTER_SOC_SENSOR,
@@ -55,7 +59,9 @@ from .const import (
     DEFAULT_WINDOW_END_HOUR,
     DEFAULT_WINDOW_START_HOUR,
     DOMAIN,
+    MORNING_SOC_HISTORY_DAYS,
     SENSOR_UNAVAILABLE_TICKS,
+    SESSION_COST_HISTORY_DAYS,
     UPDATE_INTERVAL_SECONDS,
 )
 from .consumption_tracker import ConsumptionTracker
@@ -235,6 +241,20 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         return True
 
+    @property
+    def soc_sensor_available(self) -> bool:
+        """Check if the SOC sensor is available and returning valid data."""
+        soc_entity = self.entry.data.get(CONF_INVERTER_SOC_SENSOR, "")
+        if not soc_entity:
+            return False
+        return self._is_sensor_available(soc_entity)
+
+    @property
+    def sensors_ready(self) -> bool:
+        """Check if critical sensors (SOC, price) are available for planning."""
+        price_entity = self.entry.data.get(CONF_PRICE_SENSOR, "")
+        return self.soc_sensor_available and self._is_sensor_available(price_entity)
+
     def _get_state_attrs(self, entity_id: str) -> dict[str, Any]:
         """Get attributes dict from a HA entity."""
         state = self.hass.states.get(entity_id)
@@ -317,6 +337,61 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._get_state_float(self.entry.data.get(CONF_CONSUMPTION_SENSOR, ""))
 
     @property
+    def grid_import_today(self) -> float:
+        """Today's grid import in kWh."""
+        entity_id = self._opt(CONF_GRID_IMPORT_SENSOR, "")
+        return self._get_state_float(entity_id) if entity_id else 0.0
+
+    @property
+    def grid_export_today(self) -> float:
+        """Today's grid export in kWh."""
+        entity_id = self._opt(CONF_GRID_EXPORT_SENSOR, "")
+        return self._get_state_float(entity_id) if entity_id else 0.0
+
+    @property
+    def daily_solar_production(self) -> float:
+        """Today's solar production in kWh. Falls back to actual_solar_today."""
+        entity_id = self._opt(CONF_DAILY_SOLAR_SENSOR, "")
+        if entity_id:
+            return self._get_state_float(entity_id)
+        return self.actual_solar_today
+
+    @property
+    def solar_forecast_today_hourly(self) -> dict[int, float]:
+        """Hourly solar forecast for today from the forecast_solar integration.
+
+        Returns dict mapping hour (0-23) to kWh production for that hour.
+        Combines all forecast_solar config entries.
+        """
+        result: dict[int, float] = {}
+        now = dt_util.now()
+        today = now.date()
+
+        try:
+            entries = self.hass.config_entries.async_entries("forecast_solar")
+        except Exception:
+            return result
+
+        for entry in entries:
+            runtime_data = getattr(entry, "runtime_data", None)
+            if runtime_data is None:
+                continue
+            estimate = getattr(runtime_data, "data", runtime_data)
+            wh_period = getattr(estimate, "wh_period", None)
+            if not isinstance(wh_period, dict):
+                continue
+            for dt_key, wh_value in wh_period.items():
+                try:
+                    if hasattr(dt_key, "date") and dt_key.date() == today:
+                        hour = dt_key.hour
+                        kwh = float(wh_value) / 1000.0
+                        result[hour] = result.get(hour, 0.0) + kwh
+                except (ValueError, TypeError, AttributeError):
+                    continue
+
+        return result
+
+    @property
     def solar_forecast_tomorrow_hourly(self) -> dict[int, float]:
         """Hourly solar forecast for tomorrow from the forecast_solar integration.
 
@@ -380,6 +455,10 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_record_daily_consumption(self) -> None:
         """Record today's consumption value to history (called at 23:55)."""
+        cons_entity = self.entry.data.get(CONF_CONSUMPTION_SENSOR, "")
+        if cons_entity and not self._is_sensor_available(cons_entity):
+            _LOGGER.warning("Consumption sensor unavailable at recording time, skipping")
+            return
         value = self.daily_consumption_current
         if value <= 0:
             _LOGGER.warning("Daily consumption is %.1f, skipping recording", value)
@@ -392,6 +471,11 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_record_forecast_error(self) -> None:
         """Record today's forecast error to history (called at 23:55)."""
+        actual_entity = self.entry.data.get(CONF_INVERTER_ACTUAL_SOLAR_SENSOR, "")
+        if actual_entity and not self._is_sensor_available(actual_entity):
+            _LOGGER.warning("Actual solar sensor unavailable at recording time, skipping forecast error")
+            return
+
         forecast = self.solar_forecast_today
         actual = self.actual_solar_today
 
@@ -407,6 +491,83 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "Recorded forecast error: forecast=%.1f, actual=%.1f, error=%.1f%%",
             forecast, actual, error * 100,
         )
+
+    # --- Analytics recorders ---
+
+    async def async_record_morning_soc(self) -> None:
+        """Record battery SOC at sunrise (called at sunrise)."""
+        now = dt_util.now()
+        today_str = now.strftime("%Y-%m-%d")
+
+        # Dedup by date
+        history = self.store.morning_soc_history
+        if history and history[0].get("date") == today_str:
+            _LOGGER.debug("Morning SOC already recorded for %s", today_str)
+            return
+
+        soc = self.current_soc
+        # Get planned SOC from last schedule
+        planned_soc = None
+        if self.current_schedule is not None:
+            planned_soc = self.current_schedule.target_soc
+
+        entry = {
+            "date": today_str,
+            "actual_soc": round(soc, 1),
+            "planned_soc": round(planned_soc, 1) if planned_soc is not None else None,
+        }
+
+        new_history = [entry] + history
+        await self.store.async_set_morning_soc_history(new_history[:MORNING_SOC_HISTORY_DAYS])
+        _LOGGER.info("Recorded morning SOC: %.1f%% (planned: %s)", soc, planned_soc)
+
+    async def async_record_session_cost(self, session: ChargingSession) -> None:
+        """Record a charging session's cost (called from charging_controller)."""
+        now = dt_util.now()
+        today_str = now.strftime("%Y-%m-%d")
+        capacity = self.battery_capacity
+        kwh = session.kwh_charged(capacity)
+        cost = session.total_cost(capacity)
+
+        if kwh <= 0:
+            return
+
+        entry = {
+            "date": today_str,
+            "kwh": round(kwh, 2),
+            "avg_price": round(session.avg_price, 4),
+            "cost": round(cost, 2),
+        }
+
+        history = self.store.session_cost_history
+        new_history = [entry] + history
+        await self.store.async_set_session_cost_history(new_history[:SESSION_COST_HISTORY_DAYS])
+        _LOGGER.info("Recorded session cost: %.2f kWh @ %.2f = %.2f", kwh, session.avg_price, cost)
+
+    async def async_record_bms_capacity(self) -> None:
+        """Record BMS-reported battery capacity (called at 23:55)."""
+        now = dt_util.now()
+        today_str = now.strftime("%Y-%m-%d")
+
+        # Dedup by date
+        history = self.store.bms_capacity_history
+        if history and history[0].get("date") == today_str:
+            _LOGGER.debug("BMS capacity already recorded for %s", today_str)
+            return
+
+        capacity = self.inverter_capacity_kwh
+        if capacity <= 0:
+            _LOGGER.warning("BMS capacity is %.1f, skipping recording", capacity)
+            return
+
+        entry = {
+            "date": today_str,
+            "capacity_kwh": round(capacity, 2),
+        }
+
+        new_history = [entry] + history
+        await self.store.async_set_bms_capacity_history(new_history[:BMS_CAPACITY_HISTORY_DAYS])
+        _LOGGER.info("Recorded BMS capacity: %.2f kWh", capacity)
 
     # --- Sensor health monitoring (H1) ---
 
@@ -477,15 +638,26 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             solar_tomorrow, error_history
         )
 
-        # H4: Energy deficit — use planner if available for consistent values
+        # H4: Energy deficit + overnight — use trajectory for consistent values
+        trajectory = None
         if self.planner is not None:
             try:
-                deficit_result = self.planner.compute_energy_deficit(now=now)
-                energy_deficit = deficit_result.deficit
-                charge_needed = deficit_result.charge_needed
-                usable_capacity = deficit_result.usable_capacity
+                trajectory = self.planner.simulate_trajectory(now=now)
+                energy_deficit = trajectory.daily_deficit_kwh
+                charge_needed = trajectory.charge_needed_kwh
+                usable_capacity = trajectory.usable_capacity_kwh
+                # Keep overnight data fresh every update cycle
+                self._last_overnight = OvernightNeed(
+                    dark_hours=trajectory.dark_hours,
+                    overnight_consumption=trajectory.overnight_consumption_kwh,
+                    battery_at_window_start=trajectory.battery_at_window_start_kwh,
+                    charge_needed=trajectory.charge_needed_kwh,
+                    solar_start_hour=trajectory.solar_start_hour,
+                    source=trajectory.solar_source,
+                )
             except Exception:
-                _LOGGER.debug("Planner energy deficit failed, using fallback")
+                _LOGGER.warning("Planner trajectory failed, using fallback")
+                self._last_overnight = None  # Reset stale overnight data
                 energy_deficit = avg_consumption - adjusted_solar_tomorrow
                 usable_capacity = self.battery_capacity * (self.max_charge_level - self.min_soc) / 100
                 charge_needed = max(0.0, min(energy_deficit, usable_capacity)) if energy_deficit > 0 else 0.0
@@ -594,10 +766,97 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "price_sensor_available": True,
         }
 
+        # --- Analytics sensors ---
+        self._compute_analytics(data, now)
+
         # H1: Check sensor health
         await self._check_sensor_health(data)
 
         return data
+
+    def _compute_analytics(self, data: dict[str, Any], now: Any) -> None:
+        """Compute all analytics sensor values and add to data dict."""
+        # Self-consumption ratio
+        solar_prod = self.daily_solar_production
+        grid_export = self.grid_export_today
+        if solar_prod > 0.1:
+            self_consumption = round(max(0.0, (solar_prod - grid_export)) / solar_prod * 100, 1)
+        else:
+            self_consumption = 0.0
+
+        data["self_consumption_ratio"] = self_consumption
+        data["daily_solar_production"] = round(solar_prod, 2)
+        data["daily_grid_export"] = round(grid_export, 2)
+
+        # Grid dependency
+        grid_import = self.grid_import_today
+        consumption_today = self.daily_consumption_current
+        if consumption_today > 0.1:
+            grid_dep = round(min(100.0, grid_import / consumption_today * 100), 1)
+        else:
+            grid_dep = 0.0
+
+        data["grid_dependency"] = grid_dep
+        data["daily_grid_import"] = round(grid_import, 2)
+        data["daily_total_consumption"] = round(consumption_today, 2)
+
+        # Morning SOC
+        morning_history = self.store.morning_soc_history
+        data["morning_soc_history_raw"] = morning_history
+        if morning_history:
+            data["last_morning_soc"] = morning_history[0].get("actual_soc")
+            data["last_morning_soc_planned"] = morning_history[0].get("planned_soc")
+        else:
+            data["last_morning_soc"] = None
+            data["last_morning_soc_planned"] = None
+
+        # Planned vs actual charge
+        last_session = data.get("last_session")
+        schedule = data.get("schedule")
+        capacity_kwh = data.get("battery_capacity_kwh", self.battery_capacity)
+
+        planned_kwh = schedule.required_kwh if schedule else 0.0
+        actual_kwh = last_session.kwh_charged(capacity_kwh) if last_session else 0.0
+        accuracy = round(actual_kwh / planned_kwh * 100, 1) if planned_kwh > 0 else 0.0
+
+        data["planned_charge_kwh"] = round(planned_kwh, 2)
+        data["actual_charge_kwh"] = round(actual_kwh, 2)
+        data["charge_accuracy_pct"] = accuracy
+
+        # Session cost history & weekly/monthly aggregates
+        cost_history = self.store.session_cost_history
+        data["session_cost_history_raw"] = cost_history
+
+        weekly_kwh = 0.0
+        weekly_cost = 0.0
+        monthly_kwh = 0.0
+        monthly_cost = 0.0
+        for entry in cost_history:
+            days_ago = self._days_ago(entry.get("date", ""), now)
+            if days_ago is None:
+                continue
+            if days_ago < 7:
+                weekly_kwh += entry.get("kwh", 0.0)
+                weekly_cost += entry.get("cost", 0.0)
+            if days_ago < 30:
+                monthly_kwh += entry.get("kwh", 0.0)
+                monthly_cost += entry.get("cost", 0.0)
+
+        data["weekly_charging_cost"] = round(weekly_cost, 2)
+        data["weekly_charging_kwh"] = round(weekly_kwh, 2)
+        data["monthly_charging_cost"] = round(monthly_cost, 2)
+        data["monthly_charging_kwh"] = round(monthly_kwh, 2)
+
+        # Charging savings: night cost vs hypothetical daytime cost
+        daytime_avg = self._compute_daytime_avg_price(now)
+        data["daytime_avg_price"] = round(daytime_avg, 4)
+        data["weekly_savings"] = round(max(0.0, daytime_avg * weekly_kwh - weekly_cost), 2)
+        data["monthly_savings"] = round(max(0.0, daytime_avg * monthly_kwh - monthly_cost), 2)
+
+        # BMS capacity
+        bms_history = self.store.bms_capacity_history
+        data["bms_capacity_kwh"] = round(self.inverter_capacity_kwh, 2)
+        data["bms_capacity_history_raw"] = bms_history
 
     def _compute_charging_status(self, soc: float) -> str:
         """Compute the night charging status string."""
@@ -624,3 +883,37 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         start = session.start_time[11:16] if len(session.start_time) > 15 else session.start_time
         end = session.end_time[11:16] if len(session.end_time) > 15 else session.end_time
         return f"{start}\u2013{end}"
+
+    @staticmethod
+    def _days_ago(date_str: str, now: Any) -> int | None:
+        """Return number of days between date_str (YYYY-MM-DD) and now."""
+        if not date_str or len(date_str) < 10:
+            return None
+        try:
+            from datetime import datetime
+            d = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+            today = now.date() if hasattr(now, "date") else now
+            return (today - d).days
+        except (ValueError, TypeError):
+            return None
+
+    def _compute_daytime_avg_price(self, now: Any) -> float:
+        """Compute average daytime price (hours 8-19) from today's price attributes."""
+        price_attrs = self.price_attributes
+        today_str = now.strftime("%Y-%m-%d") if hasattr(now, "strftime") else ""
+        prices: list[float] = []
+        for key, value in price_attrs.items():
+            key_str = str(key)
+            if len(key_str) < 13:
+                continue
+            if key_str[:10] != today_str:
+                continue
+            try:
+                hour = int(key_str[11:13])
+                if 8 <= hour < 19:
+                    prices.append(float(value))
+            except (ValueError, TypeError, IndexError):
+                continue
+        if prices:
+            return sum(prices) / len(prices)
+        return self.current_price

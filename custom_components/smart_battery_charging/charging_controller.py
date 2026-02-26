@@ -147,6 +147,10 @@ class ChargingStateMachine:
         if not self._is_in_window(schedule):
             return  # Not yet time
 
+        if not self._coordinator.soc_sensor_available:
+            _LOGGER.debug("SOC sensor unavailable, skipping scheduled tick")
+            return
+
         soc = self._coordinator.current_soc
 
         if soc >= schedule.target_soc:
@@ -217,6 +221,10 @@ class ChargingStateMachine:
             # Shouldn't happen, but recover gracefully
             await self._inverter.async_stop_charging(self._coordinator.min_soc)
             await self._set_state(ChargingState.IDLE)
+            return
+
+        if not self._coordinator.soc_sensor_available:
+            _LOGGER.warning("SOC sensor unavailable during charging, skipping tick")
             return
 
         soc = self._coordinator.current_soc
@@ -293,10 +301,12 @@ class ChargingStateMachine:
         """Handle morning safety trigger (sunrise - 15min).
 
         Ensures inverter is in Self Use mode regardless of current state.
-        If we were CHARGING, record a safety stop.
+        If we were CHARGING or SCHEDULED, record a safety stop.
+        Also stops if mode sensor is unavailable (safer to assume manual mode).
         """
         # Always check if inverter is in manual mode and restore if needed
         current_mode = await self._inverter.async_get_current_mode()
+        mode_unavailable = current_mode == ""
 
         if self.state == ChargingState.CHARGING:
             _LOGGER.warning("Morning safety: stopping active charge")
@@ -310,8 +320,16 @@ class ChargingStateMachine:
             await self._set_state(ChargingState.IDLE)
             if self._notifier:
                 await self._notifier.async_notify_morning_safety(soc)
-        elif self._inverter.is_manual_mode(current_mode):
-            _LOGGER.warning("Morning safety: inverter in Manual Mode, restoring Self Use")
+        elif self.state == ChargingState.SCHEDULED:
+            # After HA restart, CHARGING resumes as SCHEDULED — inverter may still be in Manual Mode
+            _LOGGER.warning("Morning safety: clearing stale SCHEDULED state")
+            await self._inverter.async_stop_charging(self._coordinator.min_soc)
+            await self._set_state(ChargingState.IDLE)
+        elif self._inverter.is_manual_mode(current_mode) or mode_unavailable:
+            if mode_unavailable:
+                _LOGGER.warning("Morning safety: mode sensor unavailable, restoring Self Use as precaution")
+            else:
+                _LOGGER.warning("Morning safety: inverter in Manual Mode, restoring Self Use")
             await self._inverter.async_stop_charging(self._coordinator.min_soc)
             await self._set_state(ChargingState.IDLE)
         else:
@@ -355,3 +373,5 @@ class ChargingStateMachine:
                 history.append(kwh)
                 history = history[-CHARGE_HISTORY_DAYS:]
                 await self._coordinator.store.async_set_charge_history(history)
+                # Record session cost for analytics
+                await self._coordinator.async_record_session_cost(self._session)

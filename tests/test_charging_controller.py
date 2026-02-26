@@ -66,6 +66,7 @@ def _make_coordinator(state=ChargingState.IDLE, current_soc=50.0, min_soc=20.0):
     coord.store.async_set_current_schedule = AsyncMock()
     coord.store.async_set_charge_history = AsyncMock()
     coord.store.charge_history = []
+    coord.async_record_session_cost = AsyncMock()
     return coord
 
 

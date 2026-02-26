@@ -214,6 +214,94 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
             "cheapest_price": _cheapest_price_attr(d["tomorrow_cheapest_hours"], d["currency"]),
         },
     ),
+    # --- Analytics sensors ---
+    SmartBatterySensorDescription(
+        key="self_consumption_ratio",
+        translation_key="self_consumption_ratio",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:solar-power-variant",
+        value_fn=lambda d: d.get("self_consumption_ratio", 0.0),
+        attrs_fn=lambda d: {
+            "solar_produced": d.get("daily_solar_production", 0.0),
+            "grid_export": d.get("daily_grid_export", 0.0),
+        },
+    ),
+    SmartBatterySensorDescription(
+        key="grid_dependency",
+        translation_key="grid_dependency",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:transmission-tower",
+        value_fn=lambda d: d.get("grid_dependency", 0.0),
+        attrs_fn=lambda d: {
+            "grid_import": d.get("daily_grid_import", 0.0),
+            "total_consumption": d.get("daily_total_consumption", 0.0),
+        },
+    ),
+    SmartBatterySensorDescription(
+        key="morning_soc",
+        translation_key="morning_soc",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-clock",
+        value_fn=lambda d: d.get("last_morning_soc"),
+        attrs_fn=lambda d: {
+            "planned_soc": d.get("last_morning_soc_planned"),
+            "history": d.get("morning_soc_history_raw", [])[:7],
+        },
+    ),
+    SmartBatterySensorDescription(
+        key="planned_vs_actual_charge",
+        translation_key="planned_vs_actual_charge",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:chart-bar",
+        value_fn=lambda d: d.get("actual_charge_kwh", 0.0),
+        attrs_fn=lambda d: {
+            "planned_kwh": d.get("planned_charge_kwh", 0.0),
+            "accuracy_pct": d.get("charge_accuracy_pct", 0.0),
+        },
+    ),
+    SmartBatterySensorDescription(
+        key="weekly_charging_cost",
+        translation_key="weekly_charging_cost",
+        icon="mdi:cash-multiple",
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda d: d.get("weekly_charging_cost", 0.0),
+        attrs_fn=lambda d: {
+            "total_kwh": d.get("weekly_charging_kwh", 0.0),
+            "monthly_cost": d.get("monthly_charging_cost", 0.0),
+            "monthly_kwh": d.get("monthly_charging_kwh", 0.0),
+        },
+    ),
+    SmartBatterySensorDescription(
+        key="charging_savings",
+        translation_key="charging_savings",
+        icon="mdi:piggy-bank-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda d: d.get("weekly_savings", 0.0),
+        attrs_fn=lambda d: {
+            "monthly_savings": d.get("monthly_savings", 0.0),
+            "daytime_avg_price": d.get("daytime_avg_price", 0.0),
+            "weekly_cost": d.get("weekly_charging_cost", 0.0),
+        },
+    ),
+    SmartBatterySensorDescription(
+        key="bms_battery_capacity",
+        translation_key="bms_battery_capacity",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-heart-variant",
+        value_fn=lambda d: d.get("bms_capacity_kwh", 0.0),
+        attrs_fn=lambda d: {
+            "history": d.get("bms_capacity_history_raw", [])[:30],
+        },
+    ),
 )
 
 
@@ -253,8 +341,8 @@ class SmartBatterySensor(
             "manufacturer": "Smart Battery Charging",
             "model": "Virtual",
         }
-        # Set currency unit for monetary sensor
-        if description.key == "last_charge_total_cost":
+        # Set currency unit for monetary sensors
+        if description.key in ("last_charge_total_cost", "weekly_charging_cost", "charging_savings"):
             currency = coordinator.currency
             # Extract currency symbol (e.g. "Kč" from "Kč/kWh")
             unit = currency.split("/")[0] if "/" in currency else currency
