@@ -36,11 +36,12 @@ for mod_name in [
 _COMPONENTS_DIR = Path(__file__).parent.parent / "custom_components"
 sys.path.insert(0, str(_COMPONENTS_DIR))
 
-from smart_battery_charging.inverter_controller import (
+from smart_battery_charging.inverters import (
     InverterCommandError,
-    InverterController,
     MODBUS_SETTLE_DELAY,
 )
+from smart_battery_charging.inverters.solax import SolaxInverter
+from smart_battery_charging.inverters.wattsonic import WattsonicInverter
 
 
 @pytest.fixture
@@ -79,13 +80,13 @@ def hass() -> MagicMock:
 
 
 @pytest.fixture
-def controller(hass, config) -> InverterController:
-    return InverterController(hass, config, control_type="select")
+def controller(hass, config) -> SolaxInverter:
+    return SolaxInverter(hass, config)
 
 
 @pytest.fixture
-def ems_controller(hass, ems_config) -> InverterController:
-    return InverterController(hass, ems_config, control_type="ems_power")
+def ems_controller(hass, ems_config) -> WattsonicInverter:
+    return WattsonicInverter(hass, ems_config)
 
 
 class TestConfigAccessors:
@@ -104,7 +105,7 @@ class TestConfigAccessors:
         assert controller.charge_stop == "Stop Charge and Discharge"
 
     def test_defaults_when_missing(self, hass):
-        ctrl = InverterController(hass, {})
+        ctrl = SolaxInverter(hass, {})
         assert ctrl.mode_select_entity == ""
         assert ctrl.mode_self_use == "Self Use Mode"
         assert ctrl.mode_manual == "Manual Mode"
@@ -125,7 +126,7 @@ class TestStartCharging:
     async def test_start_charging_sequence(self, controller, hass):
         """Verify correct order: SOC limit → Manual Mode → delay → Force Charge."""
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             await controller.async_start_charging(90.0)
@@ -149,7 +150,7 @@ class TestStartCharging:
     async def test_start_charging_has_delay(self, controller, hass):
         """Verify 5s delay between mode switch and charge command."""
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             await controller.async_start_charging(85.0)
@@ -163,7 +164,7 @@ class TestStopCharging:
     async def test_stop_charging_sequence(self, controller, hass):
         """Verify correct order: Stop → delay → Reset SOC → Self Use → discharge min."""
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             await controller.async_stop_charging(20.0)
@@ -199,9 +200,9 @@ class TestStopCharging:
             "charge_force": "Force Charge",
             "charge_stop": "Stop Charge and Discharge",
         }
-        ctrl = InverterController(hass, config_no_discharge)
+        ctrl = SolaxInverter(hass, config_no_discharge)
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             await ctrl.async_stop_charging(20.0)
@@ -213,7 +214,7 @@ class TestStopCharging:
     async def test_stop_charging_has_delay(self, controller, hass):
         """Verify 5s delay between stop command and mode restore."""
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             await controller.async_stop_charging(20.0)
@@ -279,7 +280,7 @@ class TestCommandVerification:
         hass.states.get.return_value = state_obj
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             result = await controller.async_start_charging(90.0)
@@ -294,7 +295,7 @@ class TestCommandVerification:
         hass.states.get.return_value = state_obj
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             result = await controller.async_start_charging(90.0)
@@ -309,7 +310,7 @@ class TestCommandVerification:
         hass.states.get.return_value = state_obj
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             result = await controller.async_stop_charging(20.0)
@@ -324,7 +325,7 @@ class TestCommandVerification:
         hass.states.get.return_value = state_obj
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.select_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             result = await controller.async_stop_charging(20.0)
@@ -341,7 +342,7 @@ class TestModbusTimeout:
         hass.services.async_call = AsyncMock(side_effect=asyncio.TimeoutError)
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.wait_for",
+            "smart_battery_charging.inverters.base.asyncio.wait_for",
             side_effect=asyncio.TimeoutError,
         ):
             result = await controller.async_start_charging(90.0)
@@ -354,7 +355,7 @@ class TestModbusTimeout:
         hass.services.async_call = AsyncMock(side_effect=asyncio.TimeoutError)
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.wait_for",
+            "smart_battery_charging.inverters.base.asyncio.wait_for",
             side_effect=asyncio.TimeoutError,
         ):
             result = await controller.async_stop_charging(20.0)
@@ -374,7 +375,7 @@ class TestEMSControl:
         hass.states.get.return_value = state_obj
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.ems_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             result = await ems_controller.async_start_charging(80.0)
@@ -405,7 +406,7 @@ class TestEMSControl:
         hass.states.get.return_value = state_obj
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.ems_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             result = await ems_controller.async_stop_charging(20.0)
@@ -445,7 +446,7 @@ class TestEMSControl:
         hass.states.get.return_value = state_obj
 
         with patch(
-            "smart_battery_charging.inverter_controller.asyncio.sleep",
+            "smart_battery_charging.inverters.ems_mixin.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             result = await ems_controller.async_start_charging(80.0)

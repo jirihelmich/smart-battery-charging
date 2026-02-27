@@ -86,7 +86,7 @@ from .const import (
     PRICE_FORMAT_HOUR_INT,
     PRICE_FORMAT_ISO_DATETIME,
 )
-from .inverter_templates import INVERTER_TEMPLATES, get_template
+from .inverters import INVERTER_TEMPLATES, get_template
 
 _LOGGER = logging.getLogger(__name__)
 

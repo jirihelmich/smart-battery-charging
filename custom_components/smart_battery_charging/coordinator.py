@@ -16,7 +16,7 @@ from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
     from .charging_controller import ChargingStateMachine
-    from .inverter_controller import InverterController
+    from .inverters.base import BaseInverterController as InverterController
     from .notifier import ChargingNotifier
     from .planner import ChargingPlanner
 

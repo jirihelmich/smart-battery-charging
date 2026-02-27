@@ -4,13 +4,38 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-_COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "smart_battery_charging"
-sys.path.insert(0, str(_COMPONENT_DIR))
+# Mock HA modules before importing the package
+for mod_name in [
+    "homeassistant",
+    "homeassistant.core",
+    "homeassistant.config_entries",
+    "homeassistant.helpers",
+    "homeassistant.helpers.update_coordinator",
+    "homeassistant.helpers.storage",
+    "homeassistant.helpers.entity_platform",
+    "homeassistant.helpers.selector",
+    "homeassistant.helpers.event",
+    "homeassistant.components",
+    "homeassistant.components.switch",
+    "homeassistant.components.sensor",
+    "homeassistant.components.binary_sensor",
+    "homeassistant.components.number",
+    "homeassistant.data_entry_flow",
+    "homeassistant.util",
+    "homeassistant.util.dt",
+    "voluptuous",
+]:
+    sys.modules.setdefault(mod_name, MagicMock())
 
-from inverter_templates import INVERTER_TEMPLATES, InverterTemplate, get_template
+_COMPONENTS_DIR = Path(__file__).parent.parent / "custom_components"
+sys.path.insert(0, str(_COMPONENTS_DIR))
+
+from smart_battery_charging.inverters import INVERTER_TEMPLATES, get_template
+from smart_battery_charging.models import InverterTemplate
 
 
 class TestInverterTemplates:

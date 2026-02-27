@@ -7,6 +7,25 @@ from datetime import datetime
 from enum import Enum
 
 
+@dataclass(frozen=True)
+class InverterTemplate:
+    """Template for a known inverter integration."""
+
+    id: str
+    label: str
+    description: str
+    control_type: str = "select"  # "select" or "ems_power"
+    mode_self_use: str = ""
+    mode_manual: str = ""
+    charge_force: str = ""
+    charge_stop: str = ""
+    battery_capacity: float = 15.0
+    entity_hints: dict[str, str] = field(default_factory=dict)
+    # EMS power control fields (for control_type="ems_power")
+    ems_charge_mode_value: int = 0
+    ems_normal_mode_value: int = 0
+
+
 class ChargingState(Enum):
     """State machine states for the charging controller."""
 

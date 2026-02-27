@@ -30,8 +30,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import SmartBatteryCoordinator
-from .inverter_controller import InverterController
-from .inverter_templates import get_template
+from .inverters import create_inverter_controller, get_template
 from .models import ChargingSchedule, ChargingState
 from .notifier import ChargingNotifier
 from .planner import ChargingPlanner
@@ -77,7 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     control_type = entry.data.get(CONF_CONTROL_TYPE, template.control_type)
 
     # Create Phase 2 components
-    inverter = InverterController(hass, dict(entry.data), control_type=control_type)
+    inverter = create_inverter_controller(hass, dict(entry.data), template_id=template_id, control_type=control_type)
     planner = ChargingPlanner(coordinator)
     notifier = ChargingNotifier(hass, coordinator)
     state_machine = ChargingStateMachine(coordinator, inverter, notifier)

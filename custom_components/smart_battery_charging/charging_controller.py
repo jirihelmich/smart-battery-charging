@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from .coordinator import SmartBatteryCoordinator
-    from .inverter_controller import InverterController
+    from .inverters.base import BaseInverterController as InverterController
     from .notifier import ChargingNotifier
 
 _LOGGER = logging.getLogger(__name__)
