@@ -151,10 +151,15 @@ class ChargingNotifier:
             )
 
         if deficit.charge_needed <= 0 and (overnight is None or overnight.charge_needed <= 0):
-            # Solar covers consumption and battery covers overnight
+            # No charging needed — either solar covers it or battery + solar do
             title = "☀️ No Charging Needed"
+            if deficit.solar_adjusted >= deficit.consumption:
+                reason = "Solar forecast covers tomorrow's consumption."
+            else:
+                reason = "Battery charge + solar cover tomorrow's consumption."
             message = (
-                f"Solar forecast covers tomorrow's consumption.\n\n"
+                f"{reason}\n\n"
+                f"SOC: {soc:.0f}%\n"
                 f"Solar (raw): {deficit.solar_raw:.1f} kWh\n"
                 f"Solar (adjusted): {deficit.solar_adjusted:.1f} kWh\n"
                 f"Consumption: {deficit.consumption:.1f} kWh"

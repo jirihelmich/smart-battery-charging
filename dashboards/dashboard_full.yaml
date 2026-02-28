@@ -456,17 +456,6 @@ views:
             graph_span: 7d
             span:
               end: day
-            apex_config:
-              plotOptions:
-                bar:
-                  colors:
-                    ranges:
-                      - from: -100
-                        to: -0.01
-                        color: "#4caf50"
-                      - from: 0
-                        to: 100
-                        color: "#ff9800"
             yaxis:
               - id: pct
                 apex_config:
@@ -477,15 +466,27 @@ views:
                       EVAL:function(val) { return val.toFixed(0) + '%'; }
             series:
               - entity: sensor.smart_battery_charging_today_solar_forecast_error
-                name: Daily Error
+                name: Overestimate
                 type: column
                 color: "#ff9800"
                 yaxis_id: pct
                 group_by:
                   func: min
                   duration: 1d
+                transform: "return x.map(p => [p[0], p[1] != null && p[1] >= 0 ? p[1] : null]);"
                 show:
                   in_header: raw
+              - entity: sensor.smart_battery_charging_today_solar_forecast_error
+                name: Underestimate
+                type: column
+                color: "#4caf50"
+                yaxis_id: pct
+                group_by:
+                  func: min
+                  duration: 1d
+                transform: "return x.map(p => [p[0], p[1] != null && p[1] < 0 ? p[1] : null]);"
+                show:
+                  in_header: false
               - entity: sensor.smart_battery_charging_solar_forecast_error_average
                 name: 7d Average
                 type: line

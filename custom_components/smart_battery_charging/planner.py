@@ -92,7 +92,7 @@ class ChargingPlanner:
         # --- Tomorrow's solar (with error correction) ---
         if hourly_tomorrow:
             source = "forecast_solar"
-            avg_error = max(0.0, c.forecast_corrector.average_error(error_history))
+            avg_error = c.forecast_corrector.average_error(error_history)
             for h in range(24):
                 raw = hourly_tomorrow.get(h, 0.0)
                 profile[(1, h)] = raw * (1 - avg_error)

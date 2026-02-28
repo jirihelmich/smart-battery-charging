@@ -174,7 +174,7 @@ class TestPlanNotification:
         hass.services.async_call.assert_called_once()
         data = hass.services.async_call.call_args[0][2]
         assert "No Charging Needed" in data["title"]
-        assert "Solar forecast covers" in data["message"]
+        assert "Battery charge + solar cover" in data["message"]
 
     @pytest.mark.asyncio
     async def test_plan_not_scheduled_price_too_high(self):
