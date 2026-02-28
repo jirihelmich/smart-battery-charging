@@ -627,9 +627,10 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         solar_tomorrow = self.solar_forecast_tomorrow
         actual_solar = self.actual_solar_today
 
-        # Today's live forecast error
+        # Today's live forecast error — only meaningful when actual solar > 0.5 kWh
+        # (before that, error is near 100% which pollutes charts)
         today_forecast_error = 0.0
-        if solar_today > 0.5:
+        if solar_today > 0.5 and actual_solar > 0.5:
             err = self.forecast_corrector.compute_error(solar_today, actual_solar)
             today_forecast_error = round(err * 100, 1) if err is not None else 0.0
 

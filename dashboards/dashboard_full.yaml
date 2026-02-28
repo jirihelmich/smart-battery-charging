@@ -456,6 +456,17 @@ views:
             graph_span: 7d
             span:
               end: day
+            apex_config:
+              plotOptions:
+                bar:
+                  colors:
+                    ranges:
+                      - from: -100
+                        to: -0.01
+                        color: "#4caf50"
+                      - from: 0
+                        to: 100
+                        color: "#ff9800"
             yaxis:
               - id: pct
                 apex_config:
@@ -471,7 +482,7 @@ views:
                 color: "#ff9800"
                 yaxis_id: pct
                 group_by:
-                  func: max
+                  func: min
                   duration: 1d
                 show:
                   in_header: raw
@@ -589,7 +600,7 @@ views:
                   func: max
                   duration: 1d
                 show:
-                  in_header: raw
+                  in_header: false
             grid_options:
               columns: 12
 
@@ -752,7 +763,7 @@ views:
                   func: max
                   duration: 1d
                 show:
-                  in_header: raw
+                  in_header: false
             grid_options:
               columns: 12
 
