@@ -170,8 +170,7 @@ class ChargingNotifier:
             message = (
                 f"Window: {schedule.start_hour:02d}:00–{schedule.end_hour:02d}:00 "
                 f"({schedule.window_hours}h)\n"
-                f"Charge: {schedule.required_kwh:.1f} kWh\n"
-                f"SOC: {soc:.0f}% → {schedule.target_soc:.0f}%\n"
+                f"Charge: {schedule.required_kwh:.1f} kWh → {schedule.target_soc:.0f}%\n"
                 f"Avg price: {schedule.avg_price:.2f} {currency}\n\n"
                 f"Solar (raw): {deficit.solar_raw:.1f} kWh\n"
                 f"Solar (adjusted): {deficit.solar_adjusted:.1f} kWh\n"

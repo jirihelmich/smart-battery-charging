@@ -404,7 +404,7 @@ class ChargingPlanner:
                 )
                 return None
 
-        # Build EnergyDeficit for target SOC computation
+        # Build EnergyDeficit for notification
         deficit = EnergyDeficit(
             consumption=trajectory.tomorrow_consumption,
             solar_raw=trajectory.tomorrow_solar_raw,
@@ -414,7 +414,14 @@ class ChargingPlanner:
             charge_needed=effective_charge,
             usable_capacity=trajectory.usable_capacity_kwh,
         )
-        target_soc = self.compute_target_soc(deficit, charge_kwh=effective_charge)
+
+        # Target SOC = projected SOC at window start + charge percentage
+        # battery_at_window_start_kwh is usable kWh above min_soc
+        soc_at_ws = c.min_soc + (
+            trajectory.battery_at_window_start_kwh / c.battery_capacity * 100
+        )
+        charge_pct = effective_charge / c.battery_capacity * 100
+        target_soc = min(round(soc_at_ws + charge_pct, 1), c.max_charge_level)
 
         schedule = ChargingSchedule(
             start_hour=window.start_hour,

@@ -163,7 +163,15 @@ def _register_event_listeners(
             schedule = planner.plan_charging(now=now)
             overnight = planner.last_overnight_need
             await state_machine.async_on_plan(schedule)
-            await notifier.async_notify_plan(schedule, deficit, overnight)
+            # Only notify when actionable: schedule exists, no charging needed,
+            # or prices are available (price too high). Skip when prices aren't
+            # published yet — "Not Scheduled" before ~14:00 is just noise.
+            has_prices = planner.has_tomorrow_prices(now=now)
+            no_charge = deficit.charge_needed <= 0 and (
+                overnight is None or overnight.charge_needed <= 0
+            )
+            if schedule is not None or no_charge or has_prices:
+                await notifier.async_notify_plan(schedule, deficit, overnight)
             await coordinator.async_request_refresh()
         except Exception:
             _LOGGER.exception("Error running charging planner")

@@ -466,27 +466,15 @@ views:
                       EVAL:function(val) { return val.toFixed(0) + '%'; }
             series:
               - entity: sensor.smart_battery_charging_today_solar_forecast_error
-                name: Overestimate
+                name: Daily Error
                 type: column
                 color: "#ff9800"
                 yaxis_id: pct
                 group_by:
                   func: min
                   duration: 1d
-                transform: "return x.map(p => [p[0], p[1] != null && p[1] >= 0 ? p[1] : null]);"
                 show:
                   in_header: raw
-              - entity: sensor.smart_battery_charging_today_solar_forecast_error
-                name: Underestimate
-                type: column
-                color: "#4caf50"
-                yaxis_id: pct
-                group_by:
-                  func: min
-                  duration: 1d
-                transform: "return x.map(p => [p[0], p[1] != null && p[1] < 0 ? p[1] : null]);"
-                show:
-                  in_header: false
               - entity: sensor.smart_battery_charging_solar_forecast_error_average
                 name: 7d Average
                 type: line
@@ -601,7 +589,7 @@ views:
                   func: max
                   duration: 1d
                 show:
-                  in_header: false
+                  in_header: raw
             grid_options:
               columns: 12
 
@@ -764,7 +752,7 @@ views:
                   func: max
                   duration: 1d
                 show:
-                  in_header: false
+                  in_header: raw
             grid_options:
               columns: 12
 
