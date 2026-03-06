@@ -167,6 +167,29 @@ class ChargingStateMachine:
             await self._set_state(ChargingState.COMPLETE)
             return
 
+        # Recalculate target_soc based on actual SOC at charge start.
+        # The planned target used projected SOC at window start, which may
+        # differ from actual SOC now (e.g. higher evening consumption).
+        # target = actual_soc + (required_kwh / capacity * 100)
+        capacity = self._coordinator.battery_capacity
+        if capacity > 0 and schedule.required_kwh > 0:
+            charge_pct = schedule.required_kwh / capacity * 100
+            adjusted_target = min(
+                round(soc + charge_pct, 1),
+                self._coordinator.max_charge_level,
+            )
+            if abs(adjusted_target - schedule.target_soc) > 1.0:
+                _LOGGER.info(
+                    "Adjusting target SOC: planned %.0f%% → %.0f%% "
+                    "(actual SOC %.0f%% vs projected %.0f%%)",
+                    schedule.target_soc,
+                    adjusted_target,
+                    soc,
+                    schedule.target_soc - charge_pct,
+                )
+                schedule.target_soc = adjusted_target
+                await self._set_schedule(schedule)
+
         # Start charging
         _LOGGER.info("Starting charge: SOC %.0f%%, target %.0f%%", soc, schedule.target_soc)
         ok = await self._inverter.async_start_charging(schedule.target_soc)

@@ -122,6 +122,10 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._soc_unavailable_notified: bool = False
         self._price_unavailable_notified: bool = False
 
+        # Battery threshold notifications (once per crossing)
+        self._battery_full_notified: bool = False
+        self._battery_low_notified: bool = False
+
     def _opt(self, key: str, default: Any) -> Any:
         """Get a config value, preferring options over data."""
         return self.entry.options.get(key, self.entry.data.get(key, default))
@@ -602,6 +606,29 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._price_unavailable_notified = False
             data["price_sensor_available"] = True
 
+    async def _check_battery_thresholds(self, soc: float) -> None:
+        """Notify once when battery hits full or min SOC thresholds."""
+        if not self.notifier:
+            return
+
+        # Battery full: SOC >= 100%
+        if soc >= 100:
+            if not self._battery_full_notified:
+                self._battery_full_notified = True
+                grid_export = self.grid_export_today
+                await self.notifier.async_notify_battery_full(soc, grid_export)
+        elif soc < 98:
+            # Reset with 2% hysteresis
+            self._battery_full_notified = False
+
+        # Battery low: SOC <= min_soc
+        if soc <= self.min_soc:
+            if not self._battery_low_notified:
+                self._battery_low_notified = True
+                await self.notifier.async_notify_battery_low(soc, self.min_soc)
+        elif soc > self.min_soc + 2:
+            self._battery_low_notified = False
+
     # --- Main update ---
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -627,12 +654,13 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         solar_tomorrow = self.solar_forecast_tomorrow
         actual_solar = self.actual_solar_today
 
-        # Today's live forecast error — only meaningful when actual solar > 0.5 kWh
-        # (before that, error is near 100% which pollutes charts)
-        today_forecast_error = 0.0
+        # Today's live forecast error — update when both values are meaningful,
+        # otherwise retain the last computed value (don't reset to 0 after sunset)
         if solar_today > 0.5 and actual_solar > 0.5:
             err = self.forecast_corrector.compute_error(solar_today, actual_solar)
             today_forecast_error = round(err * 100, 1) if err is not None else 0.0
+        else:
+            today_forecast_error = (self.data or {}).get("today_solar_forecast_error", 0.0)
 
         # Adjusted tomorrow solar
         adjusted_solar_tomorrow = self.forecast_corrector.adjust_forecast(
@@ -772,6 +800,9 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # H1: Check sensor health
         await self._check_sensor_health(data)
+
+        # Battery threshold notifications
+        await self._check_battery_thresholds(soc)
 
         return data
 

@@ -15,6 +15,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_NOTIFICATION_SERVICE,
+    CONF_NOTIFY_BATTERY_FULL,
+    CONF_NOTIFY_BATTERY_LOW,
     CONF_NOTIFY_CHARGING_COMPLETE,
     CONF_NOTIFY_CHARGING_STALLED,
     CONF_NOTIFY_CHARGING_START,
@@ -22,6 +24,8 @@ from .const import (
     CONF_NOTIFY_PLANNING,
     CONF_NOTIFY_SENSOR_UNAVAILABLE,
     DEFAULT_NOTIFICATION_SERVICE,
+    DEFAULT_NOTIFY_BATTERY_FULL,
+    DEFAULT_NOTIFY_BATTERY_LOW,
     DEFAULT_NOTIFY_CHARGING_COMPLETE,
     DEFAULT_NOTIFY_CHARGING_STALLED,
     DEFAULT_NOTIFY_CHARGING_START,
@@ -302,5 +306,35 @@ class ChargingNotifier:
             f"{sensor_name} sensor is unavailable.\n"
             f"Entity: {entity_id}\n"
             f"Charging decisions may be incorrect until sensor recovers."
+        )
+        await self._async_send(title, message)
+
+    async def async_notify_battery_full(
+        self, soc: float, grid_export: float
+    ) -> None:
+        """Send notification when battery is full and exporting to grid."""
+        if not self._is_enabled(
+            CONF_NOTIFY_BATTERY_FULL, DEFAULT_NOTIFY_BATTERY_FULL
+        ):
+            return
+
+        title = "🔋 Battery Full — Exporting to Grid"
+        message = (
+            f"Battery SOC: {soc:.0f}%\n"
+            f"Grid export: {grid_export:.1f} kW"
+        )
+        await self._async_send(title, message)
+
+    async def async_notify_battery_low(self, soc: float, min_soc: float) -> None:
+        """Send notification when battery reaches min SOC."""
+        if not self._is_enabled(
+            CONF_NOTIFY_BATTERY_LOW, DEFAULT_NOTIFY_BATTERY_LOW
+        ):
+            return
+
+        title = "🪫 Battery at Minimum SOC"
+        message = (
+            f"Battery SOC: {soc:.0f}%\n"
+            f"Min SOC threshold: {min_soc:.0f}%"
         )
         await self._async_send(title, message)

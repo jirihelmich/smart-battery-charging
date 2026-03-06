@@ -60,6 +60,7 @@ def _make_coordinator(state=ChargingState.IDLE, current_soc=50.0, min_soc=20.0):
     coord.current_soc = current_soc
     coord.min_soc = min_soc
     coord.battery_capacity = 15.0
+    coord.max_charge_level = 90.0
     coord.store = MagicMock()
     coord.store.async_set_last_session = AsyncMock()
     coord.store.async_set_charging_state = AsyncMock()
@@ -181,7 +182,8 @@ class TestOnTick:
         await sm.async_on_tick()
 
         assert coord.charging_state == ChargingState.CHARGING
-        inv.async_start_charging.assert_called_once_with(80.0)
+        # target adjusted: soc(30) + required_kwh(5)/capacity(15)*100 = 63.3
+        inv.async_start_charging.assert_called_once_with(63.3)
         assert sm._session.start_soc == 30.0
 
     @pytest.mark.asyncio
@@ -718,3 +720,76 @@ class TestStatePersistence:
         await sm.async_on_tick()
 
         coord.store.async_set_charge_history.assert_called_once()
+
+
+class TestTargetSocAdjustment:
+    """Tests for target SOC recalculation at charge start."""
+
+    @pytest.mark.asyncio
+    async def test_target_adjusted_when_soc_lower_than_projected(self):
+        """When actual SOC is lower than projected, target is lowered."""
+        coord = _make_coordinator(state=ChargingState.SCHEDULED, current_soc=20.0)
+        inv = _make_inverter()
+        notifier = MagicMock()
+        notifier.async_notify_charging_started = AsyncMock()
+        sm = ChargingStateMachine(coord, inv, notifier=notifier)
+
+        # Planned: projected SOC at ws ~45%, target 68%, required 3.4 kWh
+        schedule = _make_schedule(start_hour=1, end_hour=5, target_soc=68.0)
+        schedule.required_kwh = 3.4
+        coord.current_schedule = schedule
+        sm._session = _make_session()
+
+        sm._now = lambda: datetime(2026, 3, 2, 2, 0)
+
+        await sm.async_on_tick()
+
+        assert coord.charging_state == ChargingState.CHARGING
+        # target = 20 + (3.4/15*100) = 20 + 22.7 = 42.7
+        inv.async_start_charging.assert_called_once_with(42.7)
+        # Schedule persisted with adjusted target
+        saved = coord.store.async_set_current_schedule.call_args[0][0]
+        assert saved["target_soc"] == 42.7
+
+    @pytest.mark.asyncio
+    async def test_target_not_adjusted_when_close_to_planned(self):
+        """When actual SOC is close to projected, target stays."""
+        coord = _make_coordinator(state=ChargingState.SCHEDULED, current_soc=44.0)
+        inv = _make_inverter()
+        sm = ChargingStateMachine(coord, inv)
+
+        # charge_pct = 5/15*100 = 33.3, adjusted = 44+33.3 = 77.3
+        # diff from 80 = 2.7 > 1.0, so it WILL adjust
+        # To NOT trigger, need abs(adjusted - target) <= 1.0
+        # adjusted = 44 + 33.3 = 77.3, target = 77.0 → diff 0.3 ≤ 1.0
+        schedule = _make_schedule(start_hour=1, end_hour=3, target_soc=77.0)
+        coord.current_schedule = schedule
+        sm._session = _make_session()
+
+        sm._now = lambda: datetime(2026, 3, 2, 1, 30)
+
+        await sm.async_on_tick()
+
+        assert coord.charging_state == ChargingState.CHARGING
+        # Target NOT adjusted (within 1% tolerance)
+        inv.async_start_charging.assert_called_once_with(77.0)
+
+    @pytest.mark.asyncio
+    async def test_target_clamped_to_max_charge_level(self):
+        """Adjusted target doesn't exceed max_charge_level."""
+        coord = _make_coordinator(state=ChargingState.SCHEDULED, current_soc=70.0)
+        coord.max_charge_level = 90.0
+        inv = _make_inverter()
+        sm = ChargingStateMachine(coord, inv)
+
+        # charge_pct = 5/15*100 = 33.3, adjusted = 70+33.3 = 103.3 → clamped to 90
+        schedule = _make_schedule(start_hour=1, end_hour=3, target_soc=95.0)
+        coord.current_schedule = schedule
+        sm._session = _make_session()
+
+        sm._now = lambda: datetime(2026, 3, 2, 1, 30)
+
+        await sm.async_on_tick()
+
+        assert coord.charging_state == ChargingState.CHARGING
+        inv.async_start_charging.assert_called_once_with(90.0)
