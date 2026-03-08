@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .inverters.base import BaseInverterController as InverterController
     from .notifier import ChargingNotifier
     from .planner import ChargingPlanner
+    from .surplus_controller import SurplusLoadController
 
 from .const import (
     BMS_CAPACITY_HISTORY_DAYS,
@@ -62,6 +63,7 @@ from .const import (
     MORNING_SOC_HISTORY_DAYS,
     SENSOR_UNAVAILABLE_TICKS,
     SESSION_COST_HISTORY_DAYS,
+    SURPLUS_RUNTIME_HISTORY_DAYS,
     UPDATE_INTERVAL_SECONDS,
 )
 from .consumption_tracker import ConsumptionTracker
@@ -115,6 +117,7 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.state_machine: ChargingStateMachine | None = None
         self.planner: ChargingPlanner | None = None
         self.notifier: ChargingNotifier | None = None
+        self.surplus_controller: SurplusLoadController | None = None
 
         # Sensor health tracking (H1)
         self._soc_unavailable_ticks: int = 0
@@ -573,6 +576,23 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.store.async_set_bms_capacity_history(new_history[:BMS_CAPACITY_HISTORY_DAYS])
         _LOGGER.info("Recorded BMS capacity: %.2f kWh", capacity)
 
+    async def async_record_surplus_runtime(self, runtime_data: dict[str, float]) -> None:
+        """Record daily surplus load runtimes (called at midnight)."""
+        now = dt_util.now()
+        today_str = now.strftime("%Y-%m-%d")
+
+        entry = {
+            "date": today_str,
+            "loads": runtime_data,
+        }
+
+        history = self.store.surplus_runtime_history
+        new_history = [entry] + history
+        await self.store.async_set_surplus_runtime_history(
+            new_history[:SURPLUS_RUNTIME_HISTORY_DAYS]
+        )
+        _LOGGER.info("Recorded surplus runtime: %s", runtime_data)
+
     # --- Sensor health monitoring (H1) ---
 
     async def _check_sensor_health(self, data: dict[str, Any]) -> None:
@@ -802,6 +822,60 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # --- Analytics sensors ---
         self._compute_analytics(data, now)
+
+        # Surplus forecast — show tomorrow's after sunset
+        if self.planner is not None:
+            try:
+                sun = self.hass.states.get("sun.sun")
+                after_sunset = sun is not None and sun.state == "below_horizon"
+                if after_sunset:
+                    surplus_forecast = self.planner.forecast_tomorrow_surplus(now=now)
+                    data["surplus_forecast_label"] = "tomorrow"
+                else:
+                    surplus_forecast = self.planner.forecast_today_surplus(now=now)
+                    data["surplus_forecast_label"] = "today"
+                data["surplus_forecast_kwh"] = surplus_forecast.total_kwh
+                data["surplus_forecast_hours"] = surplus_forecast.surplus_hours
+                data["surplus_forecast_peak_kw"] = surplus_forecast.peak_surplus_kw
+                data["surplus_forecast_battery_full_hour"] = surplus_forecast.battery_full_hour
+                data["surplus_forecast_hourly"] = surplus_forecast.hourly_kwh
+                # Predicted runtime per load
+                if self.surplus_controller and self.surplus_controller.configs:
+                    load_runtimes: dict[str, float] = {}
+                    for cfg in self.surplus_controller.configs:
+                        if cfg.power_kw > 0:
+                            hours = surplus_forecast.total_kwh / cfg.power_kw
+                            load_runtimes[cfg.name] = round(hours, 1)
+                    data["surplus_predicted_runtimes"] = load_runtimes
+                else:
+                    data["surplus_predicted_runtimes"] = {}
+            except Exception:
+                _LOGGER.debug("Surplus forecast failed, using defaults")
+                data["surplus_forecast_kwh"] = 0.0
+                data["surplus_forecast_hours"] = 0
+                data["surplus_forecast_peak_kw"] = 0.0
+                data["surplus_forecast_battery_full_hour"] = None
+                data["surplus_forecast_hourly"] = {}
+                data["surplus_predicted_runtimes"] = {}
+        else:
+            data["surplus_forecast_kwh"] = 0.0
+            data["surplus_forecast_hours"] = 0
+            data["surplus_forecast_peak_kw"] = 0.0
+            data["surplus_forecast_battery_full_hour"] = None
+            data["surplus_forecast_hourly"] = {}
+            data["surplus_predicted_runtimes"] = {}
+
+        # Surplus load data
+        if self.surplus_controller and self.surplus_controller.configs:
+            data.update(self.surplus_controller.get_sensor_data())
+        else:
+            data["surplus_active_loads"] = 0
+            data["surplus_active_load_names"] = "None"
+            data["surplus_total_power_kw"] = 0.0
+            data["surplus_grid_export_kw"] = None
+            data["surplus_true_surplus_kw"] = None
+            data["surplus_load_details"] = []
+            data["surplus_runtime_history"] = []
 
         # H1: Check sensor health
         await self._check_sensor_health(data)

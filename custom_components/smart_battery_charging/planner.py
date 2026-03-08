@@ -14,7 +14,7 @@ from .const import (
     EMERGENCY_SOC_THRESHOLD,
     PV_FALLBACK_BUFFER_HOURS,
 )
-from .models import ChargingSchedule, EnergyDeficit, OvernightNeed, TrajectoryResult
+from .models import ChargingSchedule, EnergyDeficit, OvernightNeed, SurplusForecast, TrajectoryResult
 
 if TYPE_CHECKING:
     from .coordinator import SmartBatteryCoordinator
@@ -443,3 +443,112 @@ class ChargingPlanner:
         )
 
         return schedule
+
+    def forecast_today_surplus(self, *, now: datetime | None = None) -> SurplusForecast:
+        """Forecast today's solar surplus — excess after battery is full.
+
+        Simulates SOC from now through end of today. At each hour where
+        battery is at max and solar > consumption, the excess is surplus.
+        """
+        if now is None:
+            now = _default_now()
+        c = self._coordinator
+
+        daily_consumption = c.consumption_tracker.average(c.store.consumption_history)
+        if now.weekday() >= 5:
+            daily_consumption *= c.weekend_consumption_multiplier
+
+        capacity = c.battery_capacity
+        max_soc_kwh = capacity * c.max_charge_level / 100
+        soc_kwh = capacity * c.current_soc / 100
+
+        solar_profile, _ = self._build_solar_profile(now)
+
+        hourly_surplus: dict[int, float] = {}
+        battery_full_hour: int | None = None
+        total_surplus = 0.0
+        peak_surplus = 0.0
+
+        # Simulate from now.hour through end of today
+        for hour in range(now.hour, 24):
+            cons = self._hourly_consumption(hour, daily_consumption)
+            solar = solar_profile.get((0, hour), 0.0)
+
+            net = solar - cons
+            soc_kwh += net
+
+            # Check if battery overflows — that's surplus
+            if soc_kwh > max_soc_kwh:
+                surplus = soc_kwh - max_soc_kwh
+                soc_kwh = max_soc_kwh
+                hourly_surplus[hour] = round(surplus, 3)
+                total_surplus += surplus
+                peak_surplus = max(peak_surplus, surplus)
+
+                if battery_full_hour is None:
+                    battery_full_hour = hour
+            else:
+                soc_kwh = max(0.0, soc_kwh)
+
+        return SurplusForecast(
+            total_kwh=round(total_surplus, 2),
+            hourly_kwh=hourly_surplus,
+            battery_full_hour=battery_full_hour,
+            peak_surplus_kw=round(peak_surplus, 2),
+            surplus_hours=len(hourly_surplus),
+        )
+
+    def forecast_tomorrow_surplus(self, *, now: datetime | None = None) -> SurplusForecast:
+        """Forecast tomorrow's solar surplus.
+
+        Simulates SOC from hour 0 through 23 using tomorrow's solar profile.
+        Starting SOC: assumes battery at min_soc (conservative — overnight drain,
+        charging would raise it but surplus is best estimated conservatively).
+        """
+        if now is None:
+            now = _default_now()
+        c = self._coordinator
+
+        tomorrow = now + timedelta(days=1)
+        daily_consumption = c.consumption_tracker.average(c.store.consumption_history)
+        if tomorrow.weekday() >= 5:
+            daily_consumption *= c.weekend_consumption_multiplier
+
+        capacity = c.battery_capacity
+        max_soc_kwh = capacity * c.max_charge_level / 100
+        # Conservative: assume battery starts at min_soc after overnight drain
+        soc_kwh = capacity * c.min_soc / 100
+
+        solar_profile, _ = self._build_solar_profile(now)
+
+        hourly_surplus: dict[int, float] = {}
+        battery_full_hour: int | None = None
+        total_surplus = 0.0
+        peak_surplus = 0.0
+
+        for hour in range(24):
+            cons = self._hourly_consumption(hour, daily_consumption)
+            solar = solar_profile.get((1, hour), 0.0)
+
+            net = solar - cons
+            soc_kwh += net
+
+            if soc_kwh > max_soc_kwh:
+                surplus = soc_kwh - max_soc_kwh
+                soc_kwh = max_soc_kwh
+                hourly_surplus[hour] = round(surplus, 3)
+                total_surplus += surplus
+                peak_surplus = max(peak_surplus, surplus)
+
+                if battery_full_hour is None:
+                    battery_full_hour = hour
+            else:
+                soc_kwh = max(0.0, soc_kwh)
+
+        return SurplusForecast(
+            total_kwh=round(total_surplus, 2),
+            hourly_kwh=hourly_surplus,
+            battery_full_hour=battery_full_hour,
+            peak_surplus_kw=round(peak_surplus, 2),
+            surplus_hours=len(hourly_surplus),
+        )

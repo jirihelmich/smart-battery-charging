@@ -35,6 +35,7 @@ from .models import ChargingSchedule, ChargingState
 from .notifier import ChargingNotifier
 from .planner import ChargingPlanner
 from .storage import SmartBatteryStore
+from .surplus_controller import SurplusLoadController
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,11 +82,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     notifier = ChargingNotifier(hass, coordinator)
     state_machine = ChargingStateMachine(coordinator, inverter, notifier)
 
+    # Create surplus load controller
+    surplus_controller = SurplusLoadController(hass, coordinator, notifier)
+    surplus_controller.load_configs()
+    surplus_controller.restore_states(store.surplus_load_states)
+
     # Wire into coordinator
     coordinator.inverter = inverter
     coordinator.planner = planner
     coordinator.state_machine = state_machine
     coordinator.notifier = notifier
+    coordinator.surplus_controller = surplus_controller
 
     # Restore charging state from store (C1)
     _restore_charging_state(coordinator, store)
@@ -182,6 +189,16 @@ def _register_event_listeners(
             return
         try:
             await state_machine.async_on_tick()
+            # Run surplus controller after charging (skip during active charging)
+            if (
+                surplus_controller.configs
+                and coordinator.charging_state != ChargingState.CHARGING
+            ):
+                await surplus_controller.async_on_tick()
+                # Persist surplus states periodically
+                await store.async_set_surplus_load_states(
+                    surplus_controller.get_states_for_storage()
+                )
             await coordinator.async_request_refresh()
         except Exception:
             _LOGGER.exception("Error in charging tick")
@@ -202,11 +219,13 @@ def _register_event_listeners(
             _LOGGER.exception("Error recording morning SOC")
 
     async def _on_daily_record(_now=None) -> None:
-        """Record daily consumption, forecast error, and BMS capacity at 23:55."""
+        """Record daily consumption, forecast error, BMS capacity, and surplus runtime at 23:55."""
         try:
             await coordinator.async_record_daily_consumption()
             await coordinator.async_record_forecast_error()
             await coordinator.async_record_bms_capacity()
+            if surplus_controller.configs:
+                await surplus_controller.async_on_midnight()
         except Exception:
             _LOGGER.exception("Error recording daily data")
 

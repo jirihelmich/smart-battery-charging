@@ -37,7 +37,7 @@ sys.path.insert(0, str(_COMPONENTS_DIR))
 
 from smart_battery_charging.consumption_tracker import ConsumptionTracker
 from smart_battery_charging.forecast_corrector import ForecastCorrector
-from smart_battery_charging.models import EnergyDeficit, OvernightNeed
+from smart_battery_charging.models import EnergyDeficit, OvernightNeed, SurplusForecast
 from smart_battery_charging.planner import ChargingPlanner
 from smart_battery_charging.price_analyzer import PriceAnalyzer, PriceSlot, PriceWindow
 
@@ -1112,3 +1112,241 @@ class TestBuildSolarProfile:
         assert profile.get((0, 14), 0.0) == 1.5
         assert profile.get((0, 15), 0.0) == 1.0
         assert profile.get((0, 16), 0.0) == 0.5
+
+
+# --- Surplus Forecast tests ---
+
+# Morning time for surplus tests (solar hasn't started yet)
+_SURPLUS_NOW = datetime(2026, 3, 8, 8, 0, 0)
+
+
+class TestForecastTodaySurplus:
+    """Test forecast_today_surplus() — predicts solar overflow after battery full."""
+
+    def test_no_surplus_when_battery_not_full(self):
+        """Low SOC + moderate solar = no surplus (battery absorbs it all)."""
+        coord = _make_coordinator(
+            current_soc=20.0,  # 3 kWh in 15 kWh battery
+            solar_forecast_today=8.0,
+            solar_forecast_today_hourly={h: 0.8 for h in range(8, 18)},
+            consumption_history=[16.0, 17.0, 16.5],
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_today_surplus(now=_SURPLUS_NOW)
+
+        assert result.total_kwh == 0.0
+        assert result.surplus_hours == 0
+        assert result.battery_full_hour is None
+
+    def test_surplus_when_battery_full_and_high_solar(self):
+        """Full battery + lots of solar = surplus."""
+        coord = _make_coordinator(
+            current_soc=85.0,  # 12.75 kWh in 15 kWh battery, max=13.5 (90%)
+            solar_forecast_today=20.0,
+            # Big solar in midday hours
+            solar_forecast_today_hourly={
+                8: 0.5, 9: 1.0, 10: 2.0, 11: 3.0, 12: 3.5,
+                13: 3.5, 14: 3.0, 15: 2.0, 16: 1.0, 17: 0.5,
+            },
+            consumption_history=[12.0, 12.0, 12.0],  # low consumption
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_today_surplus(now=_SURPLUS_NOW)
+
+        assert result.total_kwh > 0
+        assert result.surplus_hours > 0
+        assert result.battery_full_hour is not None
+        assert result.peak_surplus_kw > 0
+
+    def test_surplus_zero_at_night(self):
+        """Starting at 22:00 with no solar remaining — no surplus."""
+        night_now = datetime(2026, 3, 8, 22, 0, 0)
+        coord = _make_coordinator(
+            current_soc=90.0,
+            solar_forecast_today=0.0,
+            solar_forecast_today_hourly={},
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_today_surplus(now=night_now)
+
+        assert result.total_kwh == 0.0
+        assert result.surplus_hours == 0
+
+    def test_surplus_hourly_breakdown(self):
+        """Hourly breakdown has correct hours as keys."""
+        coord = _make_coordinator(
+            current_soc=90.0,  # Battery nearly at max (13.5 kWh)
+            max_charge_level=90.0,
+            solar_forecast_today=15.0,
+            solar_forecast_today_hourly={
+                9: 0.5, 10: 2.0, 11: 3.0, 12: 3.0,
+                13: 3.0, 14: 2.0, 15: 1.5, 16: 0.5,
+            },
+            consumption_history=[10.0, 10.0, 10.0],
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_today_surplus(now=datetime(2026, 3, 8, 9, 0, 0))
+
+        # All surplus hours should be daytime hours (9-16 range)
+        for hour in result.hourly_kwh:
+            assert 6 <= hour <= 17
+
+    def test_surplus_weekend_higher_consumption(self):
+        """Weekend multiplier increases consumption, reducing surplus."""
+        # Saturday
+        saturday = datetime(2026, 3, 7, 8, 0, 0)
+        coord_weekend = _make_coordinator(
+            current_soc=90.0,
+            solar_forecast_today=15.0,
+            solar_forecast_today_hourly={h: 1.5 for h in range(8, 18)},
+            consumption_history=[12.0, 12.0, 12.0],
+            weekend_consumption_multiplier=1.3,
+        )
+
+        # Wednesday
+        wednesday = datetime(2026, 3, 4, 8, 0, 0)
+        coord_weekday = _make_coordinator(
+            current_soc=90.0,
+            solar_forecast_today=15.0,
+            solar_forecast_today_hourly={h: 1.5 for h in range(8, 18)},
+            consumption_history=[12.0, 12.0, 12.0],
+            weekend_consumption_multiplier=1.3,
+        )
+
+        planner_weekend = ChargingPlanner(coord_weekend)
+        planner_weekday = ChargingPlanner(coord_weekday)
+
+        surplus_weekend = planner_weekend.forecast_today_surplus(now=saturday)
+        surplus_weekday = planner_weekday.forecast_today_surplus(now=wednesday)
+
+        # Weekend has higher consumption → less surplus
+        assert surplus_weekend.total_kwh < surplus_weekday.total_kwh
+
+    def test_surplus_battery_full_hour_is_first_overflow(self):
+        """battery_full_hour should be the first hour where SOC exceeds max."""
+        coord = _make_coordinator(
+            current_soc=80.0,  # 12.0 kWh, max is 13.5 (90%)
+            solar_forecast_today=20.0,
+            solar_forecast_today_hourly={
+                8: 0.2, 9: 0.5, 10: 1.5, 11: 3.0, 12: 3.5,
+                13: 3.5, 14: 3.0, 15: 2.0, 16: 1.0, 17: 0.3,
+            },
+            consumption_history=[10.0, 10.0, 10.0],
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_today_surplus(now=datetime(2026, 3, 8, 8, 0, 0))
+
+        assert result.battery_full_hour is not None
+        # First surplus hour should match battery_full_hour
+        if result.hourly_kwh:
+            first_surplus_hour = min(result.hourly_kwh.keys())
+            assert result.battery_full_hour == first_surplus_hour
+
+    def test_surplus_soc_clamped_at_zero(self):
+        """SOC doesn't go negative during simulation."""
+        coord = _make_coordinator(
+            current_soc=5.0,  # very low: 0.75 kWh
+            solar_forecast_today=3.0,
+            solar_forecast_today_hourly={12: 1.0, 13: 1.0, 14: 1.0},
+            consumption_history=[20.0, 20.0, 20.0],  # high consumption
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_today_surplus(now=_SURPLUS_NOW)
+
+        # Should not produce surplus when battery is nearly empty
+        assert result.total_kwh == 0.0
+
+    def test_returns_surplus_forecast_type(self):
+        """Return type is SurplusForecast with all fields."""
+        coord = _make_coordinator()
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_today_surplus(now=_SURPLUS_NOW)
+
+        assert isinstance(result, SurplusForecast)
+        assert hasattr(result, "total_kwh")
+        assert hasattr(result, "hourly_kwh")
+        assert hasattr(result, "battery_full_hour")
+        assert hasattr(result, "peak_surplus_kw")
+        assert hasattr(result, "surplus_hours")
+
+
+class TestForecastTomorrowSurplus:
+    """Test forecast_tomorrow_surplus() — predicts next day's surplus."""
+
+    def test_tomorrow_surplus_with_high_solar(self):
+        """Lots of solar tomorrow → surplus even starting from min_soc."""
+        coord = _make_coordinator(
+            current_soc=50.0,
+            min_soc=20.0,
+            solar_forecast_tomorrow=25.0,
+            solar_forecast_tomorrow_hourly={
+                8: 1.0, 9: 2.0, 10: 3.0, 11: 3.5, 12: 3.5,
+                13: 3.5, 14: 3.0, 15: 2.5, 16: 1.5, 17: 1.0,
+            },
+            consumption_history=[12.0, 12.0, 12.0],
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_tomorrow_surplus(now=_SURPLUS_NOW)
+
+        assert result.total_kwh > 0
+        assert result.surplus_hours > 0
+
+    def test_tomorrow_surplus_low_solar_no_surplus(self):
+        """Low solar tomorrow → no surplus."""
+        coord = _make_coordinator(
+            min_soc=20.0,
+            solar_forecast_tomorrow=5.0,
+            solar_forecast_tomorrow_hourly={h: 0.5 for h in range(8, 18)},
+            consumption_history=[16.0, 16.0, 16.0],
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_tomorrow_surplus(now=_SURPLUS_NOW)
+
+        assert result.total_kwh == 0.0
+
+    def test_tomorrow_starts_at_min_soc(self):
+        """Tomorrow simulation starts conservatively at min_soc."""
+        # High current_soc shouldn't affect tomorrow's forecast
+        coord_high = _make_coordinator(
+            current_soc=90.0,
+            min_soc=20.0,
+            solar_forecast_tomorrow=15.0,
+            solar_forecast_tomorrow_hourly={h: 1.5 for h in range(8, 18)},
+            consumption_history=[12.0, 12.0, 12.0],
+        )
+        coord_low = _make_coordinator(
+            current_soc=20.0,
+            min_soc=20.0,
+            solar_forecast_tomorrow=15.0,
+            solar_forecast_tomorrow_hourly={h: 1.5 for h in range(8, 18)},
+            consumption_history=[12.0, 12.0, 12.0],
+        )
+        planner_high = ChargingPlanner(coord_high)
+        planner_low = ChargingPlanner(coord_low)
+
+        result_high = planner_high.forecast_tomorrow_surplus(now=_SURPLUS_NOW)
+        result_low = planner_low.forecast_tomorrow_surplus(now=_SURPLUS_NOW)
+
+        # Both should be the same since tomorrow starts at min_soc regardless
+        assert result_high.total_kwh == result_low.total_kwh
+
+    def test_tomorrow_weekend_multiplier(self):
+        """Weekend multiplier applied based on tomorrow's day of week."""
+        # Friday evening → tomorrow is Saturday
+        friday = datetime(2026, 3, 6, 20, 0, 0)
+        coord = _make_coordinator(
+            min_soc=20.0,
+            solar_forecast_tomorrow=20.0,
+            solar_forecast_tomorrow_hourly={h: 2.0 for h in range(8, 18)},
+            consumption_history=[12.0, 12.0, 12.0],
+            weekend_consumption_multiplier=1.3,
+        )
+        planner = ChargingPlanner(coord)
+        result = planner.forecast_tomorrow_surplus(now=friday)
+
+        # Compare with weekday (Thursday → Friday)
+        thursday = datetime(2026, 3, 5, 20, 0, 0)
+        result_weekday = planner.forecast_tomorrow_surplus(now=thursday)
+
+        # Weekend has higher consumption → less surplus
+        assert result.total_kwh < result_weekday.total_kwh

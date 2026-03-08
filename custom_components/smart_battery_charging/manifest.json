@@ -1,6 +1,6 @@
 {
   "domain": "smart_battery_charging",
-  "name": "Smart Battery Charging",
+  "name": "Smart Energy Manager",
   "codeowners": ["@jirihelmich"],
   "config_flow": true,
   "documentation": "https://github.com/jirihelmich/smart-battery-charging",

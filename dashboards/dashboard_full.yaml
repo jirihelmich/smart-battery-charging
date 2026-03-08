@@ -401,10 +401,9 @@ views:
     cards: []
     max_columns: 4
     sections:
-      # ── Row 1: Solar Accuracy ──────────────────────────────────────────
+      # ── Col 1a: Solar Accuracy ─────────────────────────────────────────
       - type: grid
         cards:
-          # Forecast vs Actual Solar — how accurate are predictions?
           - type: custom:apexcharts-card
             header:
               show: true
@@ -447,8 +446,6 @@ views:
                   in_header: raw
             grid_options:
               columns: 12
-
-          # Forecast Error Trend — is the correction working?
           - type: custom:apexcharts-card
             header:
               show: true
@@ -491,10 +488,9 @@ views:
             grid_options:
               columns: 12
 
-      # ── Row 2: Energy Balance ──────────────────────────────────────────
+      # ── Col 1b: Energy Balance ─────────────────────────────────────────
       - type: grid
         cards:
-          # Daily Energy Balance — consumption vs solar vs grid charge
           - type: custom:apexcharts-card
             header:
               show: true
@@ -553,8 +549,6 @@ views:
                   in_header: raw
             grid_options:
               columns: 12
-
-          # Charging Cost per Night
           - type: custom:apexcharts-card
             header:
               show: true
@@ -589,10 +583,9 @@ views:
             grid_options:
               columns: 12
 
-      # ── Row 3: Battery & Price ─────────────────────────────────────────
+      # ── Col 2a: Battery & Price ────────────────────────────────────────
       - type: grid
         cards:
-          # Battery SOC with Charging Windows
           - type: custom:apexcharts-card
             header:
               show: true
@@ -655,8 +648,6 @@ views:
                         background: "transparent"
             grid_options:
               columns: 12
-
-          # Electricity Price with Charge Overlay (48h)
           - type: custom:apexcharts-card
             header:
               show: true
@@ -718,10 +709,9 @@ views:
             grid_options:
               columns: 12
 
-      # ── Row 4: Long-term Trends ────────────────────────────────────────
+      # ── Col 2b: Long-term Trends ───────────────────────────────────────
       - type: grid
         cards:
-          # Grid Charging (30 days)
           - type: custom:apexcharts-card
             header:
               show: true
@@ -755,8 +745,43 @@ views:
                   return data;
             grid_options:
               columns: 12
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Grid Dependency (30d)
+              show_states: true
+              colorize_states: true
+            graph_span: 30d
+            span:
+              end: day
+            yaxis:
+              - id: pct
+                min: 0
+                max: 100
+                apex_config:
+                  title:
+                    text: "%"
+                  labels:
+                    formatter: |
+                      EVAL:function(val) { return val.toFixed(0) + '%'; }
+            series:
+              - entity: sensor.smart_battery_charging_grid_dependency
+                name: Grid Dependency
+                type: column
+                color: "#ff9800"
+                yaxis_id: pct
+                float_precision: 0
+                statistics:
+                  type: mean
+                  period: day
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
 
-          # Consumption Trend (30 days)
+      # ── Section 5: Daily Consumption ────────────────────────────────────
+      - type: grid
+        cards:
           - type: custom:apexcharts-card
             header:
               show: true
@@ -798,7 +823,7 @@ views:
             grid_options:
               columns: 12
 
-      # ── Row 5: Self-Consumption & Grid ───────────────────────────────────
+      # ── Section 6: Gauges & Analytics ──────────────────────────────────
       - type: grid
         cards:
           - type: gauge
@@ -819,6 +844,8 @@ views:
                 color: '#8bc34a'
               - from: 90
                 color: '#43a047'
+            grid_options:
+              columns: 6
           - type: gauge
             entity: sensor.smart_battery_charging_grid_dependency
             name: Grid Dependency
@@ -837,47 +864,8 @@ views:
                 color: '#fb8c00'
               - from: 80
                 color: '#e53935'
-
-      # ── Row 5b: Grid Dependency Trend ─────────────────────────────────
-      - type: grid
-        cards:
-          - type: custom:apexcharts-card
-            header:
-              show: true
-              title: Grid Dependency (30d)
-              show_states: true
-              colorize_states: true
-            graph_span: 30d
-            span:
-              end: day
-            yaxis:
-              - id: pct
-                min: 0
-                max: 100
-                apex_config:
-                  title:
-                    text: "%"
-                  labels:
-                    formatter: |
-                      EVAL:function(val) { return val.toFixed(0) + '%'; }
-            series:
-              - entity: sensor.smart_battery_charging_grid_dependency
-                name: Grid Dependency
-                type: column
-                color: "#ff9800"
-                yaxis_id: pct
-                float_precision: 0
-                group_by:
-                  func: last
-                  duration: 1d
-                show:
-                  in_header: raw
             grid_options:
-              columns: 12
-
-      # ── Row 6: Charging Analytics ────────────────────────────────────────
-      - type: grid
-        cards:
+              columns: 6
           - type: glance
             title: Charging Analytics
             columns: 3
@@ -896,17 +884,19 @@ views:
                 name: Weekly Savings
               - entity: sensor.smart_battery_charging_bms_battery_capacity
                 name: BMS Capacity
+            grid_options:
+              columns: 12
 
-      # ── Row 7a: BMS Capacity Trend ───────────────────────────────────────
+      # ── Section 7: BMS Capacity ────────────────────────────────────────
       - type: grid
         cards:
           - type: custom:apexcharts-card
             header:
               show: true
-              title: BMS Battery Capacity
+              title: BMS Battery Capacity (90d)
               show_states: true
               colorize_states: true
-            graph_span: 30d
+            graph_span: 90d
             span:
               end: day
             yaxis:
@@ -922,13 +912,15 @@ views:
                 stroke_width: 2
                 yaxis_id: kwh
                 float_precision: 2
-                group_by:
-                  func: max
-                  duration: 1d
+                statistics:
+                  type: max
+                  period: day
                 show:
                   in_header: raw
+            grid_options:
+              columns: 12
 
-      # ── Row 7b: Charging Cost & Savings Trend ──────────────────────────────
+      # ── Section 8: Charging Cost & Savings ─────────────────────────────
       - type: grid
         cards:
           - type: custom:apexcharts-card
@@ -954,9 +946,9 @@ views:
                 stroke_width: 2
                 yaxis_id: cost
                 float_precision: 1
-                group_by:
-                  func: max
-                  duration: 1d
+                statistics:
+                  type: max
+                  period: day
                 show:
                   in_header: raw
               - entity: sensor.smart_battery_charging_charging_savings
@@ -966,8 +958,273 @@ views:
                 stroke_width: 2
                 yaxis_id: cost
                 float_precision: 1
+                statistics:
+                  type: max
+                  period: day
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+  # ═══════════════════════════════════════════════════════════════════════
+  #  View 3: Surplus Load Management
+  # ═══════════════════════════════════════════════════════════════════════
+  - type: sections
+    title: Surplus
+    cards: []
+    max_columns: 3
+    sections:
+      # ── Col 1: Status & Controls ──────────────────────────────────────
+      - type: grid
+        cards:
+          - type: entities
+            title: Surplus Status
+            show_header_toggle: false
+            entities:
+              - entity: sensor.smart_battery_charging_surplus_load_status
+                name: Active Loads
+              - entity: sensor.solax_inverter_battery_capacity
+                name: Battery SOC
+              - entity: sensor.solax_inverter_grid_export
+                name: Grid Export (W)
+            grid_options:
+              columns: 12
+          - type: markdown
+            title: Load Details
+            content: >-
+              {% set details =
+              state_attr('sensor.smart_battery_charging_surplus_load_status',
+              'load_details') or [] %}
+              {% if details | length == 0 %}
+              *No surplus loads configured.*
+
+              Go to Settings → Devices → Smart Battery Charging → Configure →
+              Surplus Load Management to add loads.
+              {% else %}
+              | Load | Power | Priority | Status | Today |
+              |------|-------|----------|--------|-------|
+              {% for d in details %}
+              | {{ d.name }} | {{ d.power_kw }} kW | {{ d.priority }} | {{
+              '🟢 ON' if d.is_running else '⚪ OFF' }} | {{ d.runtime_today_h
+              }}h |
+              {% endfor %}
+              {% endif %}
+            grid_options:
+              columns: 12
+          - type: markdown
+            title: Surplus Forecast
+            content: >-
+              {% set surplus = states('sensor.smart_battery_charging_surplus_forecast') | float(0) %}
+              {% set hours = state_attr('sensor.smart_battery_charging_surplus_forecast', 'surplus_hours') | int(0) %}
+              {% set full_hour = state_attr('sensor.smart_battery_charging_surplus_forecast', 'battery_full_hour') %}
+              {% set runtimes = state_attr('sensor.smart_battery_charging_surplus_forecast', 'predicted_runtimes') or {} %}
+              {% set day = state_attr('sensor.smart_battery_charging_surplus_forecast', 'forecast_day') or 'today' %}
+              {% if surplus == 0 %}
+              *No surplus expected {{ day }}.*
+              {% else %}
+              **{{ "Tomorrow" if day == "tomorrow" else "Today" }}: {{ surplus }} kWh** surplus over **{{ hours }}** hours{% if full_hour is not none %} (battery full at {{ full_hour }}:00){% endif %}
+
+              {% if runtimes | length > 0 %}
+              {% for name, h in runtimes.items() %}
+              - **{{ name }}**: ~{{ h }}h
+              {% endfor %}
+              {% else %}
+              No loads configured.
+              {% endif %}
+              {% endif %}
+            grid_options:
+              columns: 12
+          - type: conditional
+            conditions:
+              - condition: numeric_state
+                entity: sensor.smart_battery_charging_surplus_load_status
+                attribute: active_loads
+                above: 0
+            card:
+              type: glance
+              title: Current Surplus
+              columns: 3
+              show_state: true
+              entities:
+                - entity: sensor.smart_battery_charging_surplus_load_status
+                  attribute: true_surplus_kw
+                  name: True Surplus
+                  icon: mdi:solar-power
+                - entity: sensor.smart_battery_charging_surplus_load_status
+                  attribute: total_power_kw
+                  name: Load Power
+                  icon: mdi:flash
+                - entity: sensor.smart_battery_charging_surplus_load_status
+                  attribute: grid_export_kw
+                  name: Grid Export
+                  icon: mdi:transmission-tower-export
+            grid_options:
+              columns: 12
+      # ── Col 2: Real-time Charts ───────────────────────────────────────
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Grid Export Power
+              show_states: true
+              colorize_states: true
+            graph_span: 24h
+            apex_config:
+              chart:
+                height: 180px
+            span:
+              start: day
+            now:
+              show: true
+              label: Now
+            yaxis:
+              - id: power
+                min: ~0
+                apex_config:
+                  title:
+                    text: kW
+            series:
+              - entity: sensor.solax_inverter_grid_export
+                name: Grid Export
+                type: area
+                color: "#4caf50"
+                stroke_width: 1
+                opacity: 0.3
+                yaxis_id: power
+                group_by:
+                  func: avg
+                  duration: 15min
+                transform: "return x / 1000;"
+                show:
+                  in_header: raw
+                float_precision: 2
+            grid_options:
+              columns: 12
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Battery SOC
+              show_states: true
+              colorize_states: true
+            graph_span: 24h
+            apex_config:
+              chart:
+                height: 180px
+            span:
+              start: day
+            now:
+              show: true
+              label: Now
+            yaxis:
+              - id: pct
+                min: 0
+                max: 100
+                apex_config:
+                  title:
+                    text: "%"
+            series:
+              - entity: sensor.solax_inverter_battery_capacity
+                name: SOC
+                type: area
+                color: "#2196f3"
+                stroke_width: 2
+                opacity: 0.2
+                yaxis_id: pct
+                group_by:
+                  func: avg
+                  duration: 15min
+                show:
+                  in_header: raw
+                float_precision: 0
+            grid_options:
+              columns: 12
+      # ── Col 3: Runtime History ────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: markdown
+            title: Runtime History (last 7 days)
+            content: >-
+              {% set history =
+              state_attr('sensor.smart_battery_charging_surplus_load_status',
+              'runtime_history') or [] %}
+              {% if history | length == 0 %}
+              *No runtime data yet.*
+              {% else %}
+              | Date | Loads |
+              |------|-------|
+              {% for entry in history %}
+              | {{ entry.date }} | {% for name, hours in entry.loads.items()
+              %}{{ name }}: {{ hours }}h{% if not loop.last %}, {% endif %}{%
+              endfor %} |
+              {% endfor %}
+              {% endif %}
+            grid_options:
+              columns: 12
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Daily Runtime
+            graph_span: 7d
+            span:
+              end: day
+            chart_type: line
+            series:
+              - entity: sensor.smart_battery_charging_surplus_load_status
+                name: Runtime
+                type: column
+                color: "#ff9800"
+                float_precision: 1
+                data_generator: >
+                  const history =
+                  entity.attributes.runtime_history || [];
+
+                  return history.map(entry => {
+                    const totalHours = Object.values(entry.loads || {}).reduce((a, b) => a + b, 0);
+                    return [new Date(entry.date).getTime(), totalHours];
+                  }).reverse();
+            apex_config:
+              chart:
+                height: 180px
+            grid_options:
+              columns: 12
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Solar Production vs Export (7d)
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            span:
+              end: day
+            yaxis:
+              - id: kwh
+                min: ~0
+                apex_config:
+                  title:
+                    text: kWh
+            series:
+              - entity: sensor.solax_inverter_today_s_solar_energy
+                name: Solar
+                type: column
+                color: "#ffc107"
+                yaxis_id: kwh
+                float_precision: 1
                 group_by:
                   func: max
                   duration: 1d
                 show:
                   in_header: raw
+              - entity: sensor.solax_energy_dashboard_solax_grid_export_energy
+                name: Grid Export
+                type: column
+                color: "#8bc34a"
+                yaxis_id: kwh
+                float_precision: 1
+                group_by:
+                  func: max
+                  duration: 1d
+                show:
+                  in_header: raw
+            grid_options:
+              columns: 12
+              rows: 3

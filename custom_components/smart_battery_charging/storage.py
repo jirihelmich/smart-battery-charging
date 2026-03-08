@@ -20,6 +20,7 @@ from .const import (
     FORECAST_ERROR_WINDOW_DAYS,
     MORNING_SOC_HISTORY_DAYS,
     SESSION_COST_HISTORY_DAYS,
+    SURPLUS_RUNTIME_HISTORY_DAYS,
 )
 from .models import ChargingSession
 
@@ -42,6 +43,8 @@ def _default_data() -> dict[str, Any]:
         "morning_soc_history": [],
         "session_cost_history": [],
         "bms_capacity_history": [],
+        "surplus_load_states": {},
+        "surplus_runtime_history": [],
     }
 
 
@@ -204,6 +207,30 @@ class SmartBatteryStore:
     async def async_set_bms_capacity_history(self, history: list[dict]) -> None:
         """Set the BMS capacity history and persist."""
         self._data["bms_capacity_history"] = history[:BMS_CAPACITY_HISTORY_DAYS]
+        await self.async_save()
+
+    # --- Surplus Load States ---
+
+    @property
+    def surplus_load_states(self) -> dict:
+        """Return persisted surplus load states."""
+        return dict(self._data.get("surplus_load_states", {}))
+
+    async def async_set_surplus_load_states(self, states: dict) -> None:
+        """Set surplus load states and persist."""
+        self._data["surplus_load_states"] = states
+        await self.async_save()
+
+    # --- Surplus Runtime History ---
+
+    @property
+    def surplus_runtime_history(self) -> list[dict]:
+        """Return surplus runtime history (most recent first)."""
+        return list(self._data.get("surplus_runtime_history", []))
+
+    async def async_set_surplus_runtime_history(self, history: list[dict]) -> None:
+        """Set surplus runtime history and persist."""
+        self._data["surplus_runtime_history"] = history[:SURPLUS_RUNTIME_HISTORY_DAYS]
         await self.async_save()
 
     async def async_remove(self) -> None:

@@ -61,6 +61,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         translation_key="today_solar_forecast",
         native_unit_of_measurement="kWh",
         device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["today_solar_forecast"],
     ),
     SmartBatterySensorDescription(
@@ -86,6 +87,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         key="today_solar_forecast_error",
         translation_key="today_solar_forecast_error",
         native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["today_solar_forecast_error"],
         attrs_fn=lambda d: {
             "forecast": d["today_solar_forecast"],
@@ -292,6 +294,37 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
         },
     ),
     SmartBatterySensorDescription(
+        key="surplus_forecast",
+        translation_key="surplus_forecast",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:solar-power-variant-outline",
+        value_fn=lambda d: d.get("surplus_forecast_kwh", 0.0),
+        attrs_fn=lambda d: {
+            "forecast_day": d.get("surplus_forecast_label", "today"),
+            "surplus_hours": d.get("surplus_forecast_hours", 0),
+            "peak_surplus_kw": d.get("surplus_forecast_peak_kw", 0.0),
+            "battery_full_hour": d.get("surplus_forecast_battery_full_hour"),
+            "hourly_kwh": d.get("surplus_forecast_hourly", {}),
+            "predicted_runtimes": d.get("surplus_predicted_runtimes", {}),
+        },
+    ),
+    SmartBatterySensorDescription(
+        key="surplus_load_status",
+        translation_key="surplus_load_status",
+        icon="mdi:solar-power",
+        value_fn=lambda d: d.get("surplus_active_load_names", "None"),
+        attrs_fn=lambda d: {
+            "active_loads": d.get("surplus_active_loads", 0),
+            "total_power_kw": d.get("surplus_total_power_kw", 0.0),
+            "grid_export_kw": d.get("surplus_grid_export_kw"),
+            "true_surplus_kw": d.get("surplus_true_surplus_kw"),
+            "load_details": d.get("surplus_load_details", []),
+            "runtime_history": d.get("surplus_runtime_history", [])[:7],
+        },
+    ),
+    SmartBatterySensorDescription(
         key="bms_battery_capacity",
         translation_key="bms_battery_capacity",
         native_unit_of_measurement="kWh",
@@ -339,7 +372,7 @@ class SmartBatterySensor(
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": entry.title,
-            "manufacturer": "Smart Battery Charging",
+            "manufacturer": "Smart Energy Manager",
             "model": "Virtual",
         }
         # Set currency unit for monetary sensors

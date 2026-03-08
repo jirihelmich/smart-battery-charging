@@ -211,7 +211,7 @@ class SmartBatteryNumber(NumberEntity):
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": entry.title,
-            "manufacturer": "Smart Battery Charging",
+            "manufacturer": "Smart Energy Manager",
             "model": "Virtual",
         }
         # Set unit for price from config

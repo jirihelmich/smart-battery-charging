@@ -23,6 +23,7 @@ from .const import (
     CONF_NOTIFY_MORNING_SAFETY,
     CONF_NOTIFY_PLANNING,
     CONF_NOTIFY_SENSOR_UNAVAILABLE,
+    CONF_NOTIFY_SURPLUS_LOAD,
     DEFAULT_NOTIFICATION_SERVICE,
     DEFAULT_NOTIFY_BATTERY_FULL,
     DEFAULT_NOTIFY_BATTERY_LOW,
@@ -32,6 +33,7 @@ from .const import (
     DEFAULT_NOTIFY_MORNING_SAFETY,
     DEFAULT_NOTIFY_PLANNING,
     DEFAULT_NOTIFY_SENSOR_UNAVAILABLE,
+    DEFAULT_NOTIFY_SURPLUS_LOAD,
 )
 from .models import ChargingSchedule, ChargingSession, EnergyDeficit, OvernightNeed
 
@@ -336,5 +338,27 @@ class ChargingNotifier:
         message = (
             f"Battery SOC: {soc:.0f}%\n"
             f"Min SOC threshold: {min_soc:.0f}%"
+        )
+        await self._async_send(title, message)
+
+    async def async_notify_surplus_load(
+        self,
+        load_name: str,
+        turned_on: bool,
+        surplus_kw: float,
+        soc: float,
+    ) -> None:
+        """Send notification when a surplus load is switched."""
+        if not self._is_enabled(
+            CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD
+        ):
+            return
+
+        action = "ON" if turned_on else "OFF"
+        emoji = "☀️" if turned_on else "🔌"
+        title = f"{emoji} Surplus: {load_name} {action}"
+        message = (
+            f"Surplus: {surplus_kw:.1f} kW\n"
+            f"Battery SOC: {soc:.0f}%"
         )
         await self._async_send(title, message)

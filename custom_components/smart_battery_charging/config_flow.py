@@ -24,6 +24,7 @@ from .const import (
     CONF_EMS_NORMAL_MODE_VALUE,
     CONF_EVENING_CONSUMPTION_MULTIPLIER,
     CONF_FALLBACK_CONSUMPTION,
+    CONF_GRID_EXPORT_POWER_SENSOR,
     CONF_GRID_EXPORT_SENSOR,
     CONF_GRID_IMPORT_SENSOR,
     CONF_INVERTER_AC_LOWER_LIMIT_NUMBER,
@@ -46,16 +47,20 @@ from .const import (
     CONF_MODE_SELF_USE,
     CONF_NIGHT_CONSUMPTION_MULTIPLIER,
     CONF_NOTIFICATION_SERVICE,
+    CONF_NOTIFY_BATTERY_FULL,
+    CONF_NOTIFY_BATTERY_LOW,
     CONF_NOTIFY_CHARGING_COMPLETE,
     CONF_NOTIFY_CHARGING_STALLED,
     CONF_NOTIFY_CHARGING_START,
     CONF_NOTIFY_MORNING_SAFETY,
     CONF_NOTIFY_PLANNING,
     CONF_NOTIFY_SENSOR_UNAVAILABLE,
+    CONF_NOTIFY_SURPLUS_LOAD,
     CONF_PRICE_ATTRIBUTE_FORMAT,
     CONF_PRICE_SENSOR,
     CONF_SOLAR_FORECAST_TODAY,
     CONF_SOLAR_FORECAST_TOMORROW,
+    CONF_SURPLUS_LOADS,
     CONF_WEEKEND_CONSUMPTION_MULTIPLIER,
     CONF_WINDOW_END_HOUR,
     CONF_WINDOW_START_HOUR,
@@ -72,13 +77,21 @@ from .const import (
     DEFAULT_MIN_SOC,
     DEFAULT_NIGHT_CONSUMPTION_MULTIPLIER,
     DEFAULT_NOTIFICATION_SERVICE,
+    DEFAULT_NOTIFY_BATTERY_FULL,
+    DEFAULT_NOTIFY_BATTERY_LOW,
     DEFAULT_NOTIFY_CHARGING_COMPLETE,
     DEFAULT_NOTIFY_CHARGING_STALLED,
     DEFAULT_NOTIFY_CHARGING_START,
     DEFAULT_NOTIFY_MORNING_SAFETY,
     DEFAULT_NOTIFY_PLANNING,
     DEFAULT_NOTIFY_SENSOR_UNAVAILABLE,
+    DEFAULT_NOTIFY_SURPLUS_LOAD,
     DEFAULT_PRICE_ATTRIBUTE_FORMAT,
+    DEFAULT_SURPLUS_BATTERY_OFF,
+    DEFAULT_SURPLUS_BATTERY_ON,
+    DEFAULT_SURPLUS_MARGIN_OFF,
+    DEFAULT_SURPLUS_MARGIN_ON,
+    DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL,
     DEFAULT_WEEKEND_CONSUMPTION_MULTIPLIER,
     DEFAULT_WINDOW_END_HOUR,
     DEFAULT_WINDOW_START_HOUR,
@@ -133,7 +146,7 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required("name", default="Smart Battery Charging"): str,
+                    vol.Required("name", default="Smart Energy Manager"): str,
                 }
             ),
         )
@@ -386,7 +399,7 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=self._data.get("name", "Smart Battery Charging"),
+                    title=self._data.get("name", "Smart Energy Manager"),
                     data=self._data,
                 )
 
@@ -443,16 +456,41 @@ class SmartBatteryChargingConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class SmartBatteryChargingOptionsFlow(OptionsFlow):
-    """Handle options for Smart Battery Charging."""
+    """Handle options for Smart Battery Charging.
+
+    Uses a menu-based flow:
+      init → menu (Settings / Surplus Loads)
+      settings → main charging settings form
+      surplus_menu → list loads, add/remove
+      surplus_add → form for new load
+      surplus_remove → select load to remove
+    """
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
+        # Working copy of options — accumulated across sub-steps
+        self._options: dict[str, Any] = {}
+
+    def _current(self) -> dict[str, Any]:
+        """Merged data + options for reading current values."""
+        return {**self._config_entry.data, **self._config_entry.options, **self._options}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Manage the settings options."""
+        """Show menu: Settings or Surplus Loads."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["settings", "surplus_menu"],
+        )
+
+    # ---- Settings (the original big form) ----
+
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the main charging settings."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -462,12 +500,14 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
             if min_soc >= max_charge:
                 errors["base"] = "min_soc_exceeds_max"
             else:
-                return self.async_create_entry(title="", data=user_input)
+                # Preserve surplus_loads from existing options
+                merged = {**self._config_entry.options, **user_input}
+                return self.async_create_entry(title="", data=merged)
 
-        current = {**self._config_entry.data, **self._config_entry.options}
+        current = self._current()
 
         return self.async_show_form(
-            step_id="init",
+            step_id="settings",
             data_schema=vol.Schema(
                 {
                     vol.Required(
@@ -565,7 +605,143 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                         CONF_NOTIFY_SENSOR_UNAVAILABLE,
                         default=current.get(CONF_NOTIFY_SENSOR_UNAVAILABLE, DEFAULT_NOTIFY_SENSOR_UNAVAILABLE),
                     ): bool,
+                    vol.Optional(
+                        CONF_NOTIFY_BATTERY_FULL,
+                        default=current.get(CONF_NOTIFY_BATTERY_FULL, DEFAULT_NOTIFY_BATTERY_FULL),
+                    ): bool,
+                    vol.Optional(
+                        CONF_NOTIFY_BATTERY_LOW,
+                        default=current.get(CONF_NOTIFY_BATTERY_LOW, DEFAULT_NOTIFY_BATTERY_LOW),
+                    ): bool,
+                    vol.Optional(
+                        CONF_NOTIFY_SURPLUS_LOAD,
+                        default=current.get(CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD),
+                    ): bool,
+                    # Surplus load controller — grid export power sensor
+                    vol.Optional(
+                        CONF_GRID_EXPORT_POWER_SENSOR,
+                        default=current.get(CONF_GRID_EXPORT_POWER_SENSOR, ""),
+                    ): _entity_selector("sensor"),
                 }
             ),
             errors=errors,
+        )
+
+    # ---- Surplus Load Management ----
+
+    def _get_surplus_loads(self) -> list[dict[str, Any]]:
+        """Get the current surplus loads list."""
+        current = self._current()
+        loads = current.get(CONF_SURPLUS_LOADS, [])
+        return list(loads) if isinstance(loads, list) else []
+
+    async def async_step_surplus_menu(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Show surplus loads list and management options."""
+        loads = self._get_surplus_loads()
+
+        menu_options = ["surplus_add"]
+        if loads:
+            menu_options.append("surplus_remove")
+
+        # Build description showing current loads
+        if loads:
+            load_lines = "\n".join(
+                f"  {i+1}. **{ld['name']}** — {ld['power_kw']} kW, "
+                f"priority {ld.get('priority', 1)}, "
+                f"entity: `{ld['switch_entity']}`"
+                for i, ld in enumerate(loads)
+            )
+            description = f"**Configured loads:**\n{load_lines}"
+        else:
+            description = "No surplus loads configured."
+
+        return self.async_show_menu(
+            step_id="surplus_menu",
+            menu_options=menu_options,
+            description_placeholders={"load_list": description},
+        )
+
+    async def async_step_surplus_add(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Add a new surplus load."""
+        if user_input is not None:
+            loads = self._get_surplus_loads()
+            loads.append({
+                "name": user_input["name"],
+                "switch_entity": user_input["switch_entity"],
+                "power_kw": user_input["power_kw"],
+                "priority": user_input.get("priority", len(loads) + 1),
+                "battery_on_threshold": user_input.get("battery_on_threshold", DEFAULT_SURPLUS_BATTERY_ON),
+                "battery_off_threshold": user_input.get("battery_off_threshold", DEFAULT_SURPLUS_BATTERY_OFF),
+                "margin_on_kw": user_input.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON),
+                "margin_off_kw": user_input.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF),
+                "min_switch_interval": user_input.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL),
+            })
+            self._options[CONF_SURPLUS_LOADS] = loads
+            return self.async_create_entry(
+                title="", data={**self._config_entry.options, **self._options}
+            )
+
+        loads = self._get_surplus_loads()
+        next_priority = len(loads) + 1
+
+        return self.async_show_form(
+            step_id="surplus_add",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("name"): str,
+                    vol.Required("switch_entity"): _entity_selector("switch"),
+                    vol.Required("power_kw"): vol.All(
+                        vol.Coerce(float), vol.Range(min=0.1, max=50.0)
+                    ),
+                    vol.Optional("priority", default=next_priority): vol.All(
+                        vol.Coerce(int), vol.Range(min=1, max=10)
+                    ),
+                    vol.Optional(
+                        "battery_on_threshold", default=DEFAULT_SURPLUS_BATTERY_ON
+                    ): vol.All(vol.Coerce(float), vol.Range(min=50.0, max=100.0)),
+                    vol.Optional(
+                        "battery_off_threshold", default=DEFAULT_SURPLUS_BATTERY_OFF
+                    ): vol.All(vol.Coerce(float), vol.Range(min=50.0, max=100.0)),
+                    vol.Optional(
+                        "margin_on_kw", default=DEFAULT_SURPLUS_MARGIN_ON
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=5.0)),
+                    vol.Optional(
+                        "margin_off_kw", default=DEFAULT_SURPLUS_MARGIN_OFF
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=5.0)),
+                    vol.Optional(
+                        "min_switch_interval", default=DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL
+                    ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
+                }
+            ),
+        )
+
+    async def async_step_surplus_remove(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Remove a surplus load."""
+        loads = self._get_surplus_loads()
+
+        if user_input is not None:
+            remove_name = user_input.get("load_to_remove", "")
+            new_loads = [ld for ld in loads if ld["name"] != remove_name]
+            self._options[CONF_SURPLUS_LOADS] = new_loads
+            return self.async_create_entry(
+                title="", data={**self._config_entry.options, **self._options}
+            )
+
+        load_names = [ld["name"] for ld in loads]
+        if not load_names:
+            return await self.async_step_surplus_menu()
+
+        return self.async_show_form(
+            step_id="surplus_remove",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("load_to_remove"): _select_selector(load_names),
+                }
+            ),
         )

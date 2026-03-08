@@ -125,3 +125,39 @@ class TrajectoryResult:
     tomorrow_solar_adjusted: float
     forecast_error_pct: float
     usable_capacity_kwh: float
+
+
+@dataclass(frozen=True)
+class SurplusForecast:
+    """Predicted solar surplus for today."""
+
+    total_kwh: float  # Total surplus kWh expected today
+    hourly_kwh: dict[int, float]  # hour -> surplus kWh (only hours with surplus)
+    battery_full_hour: int | None  # First hour battery hits max (None if never)
+    peak_surplus_kw: float  # Maximum hourly surplus
+    surplus_hours: int  # Number of hours with surplus > 0
+
+
+@dataclass(frozen=True)
+class SurplusLoadConfig:
+    """Configuration for a single surplus load."""
+
+    name: str
+    switch_entity: str
+    power_kw: float
+    priority: int = 1  # Lower = higher priority (turned on first, off last)
+    battery_on_threshold: float = 98.0  # SOC % to enable
+    battery_off_threshold: float = 95.0  # SOC % to disable
+    margin_on_kw: float = 0.3  # Extra surplus above power_kw to turn ON
+    margin_off_kw: float = 0.5  # Deficit below 0 to turn OFF
+    min_switch_interval: int = 300  # Seconds between switches (anti-flap)
+
+
+@dataclass
+class SurplusLoadState:
+    """Mutable runtime state for a single surplus load."""
+
+    is_running: bool = False
+    last_switch_time: float = 0.0  # timestamp
+    daily_runtime_seconds: float = 0.0  # today's accumulated runtime
+    last_tick_time: float = 0.0  # for runtime accumulation

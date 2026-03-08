@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Smart Battery Charging",
+        "title": "Smart Energy Manager",
         "description": "Set up smart battery charging for your inverter.",
         "data": {
           "name": "Name"
@@ -99,6 +99,13 @@
   "options": {
     "step": {
       "init": {
+        "title": "Smart Energy Manager",
+        "menu_options": {
+          "settings": "Charging Settings",
+          "surplus_menu": "Surplus Load Management"
+        }
+      },
+      "settings": {
         "title": "Charging Settings",
         "description": "Adjust battery and charging parameters.",
         "data": {
@@ -114,13 +121,51 @@
           "grid_import_sensor": "Daily grid import sensor",
           "grid_export_sensor": "Daily grid export sensor",
           "daily_solar_sensor": "Daily solar production sensor",
+          "charging_efficiency": "Charging efficiency (0.7-1.0)",
+          "evening_consumption_multiplier": "Evening consumption multiplier",
+          "night_consumption_multiplier": "Night consumption multiplier",
+          "weekend_consumption_multiplier": "Weekend consumption multiplier",
           "notification_service": "Notification service name (e.g. mobile_app_phone, leave empty to disable)",
           "notify_planning": "Notify: Charging plan",
           "notify_charging_start": "Notify: Charging started",
           "notify_charging_complete": "Notify: Charging complete",
           "notify_morning_safety": "Notify: Morning safety",
           "notify_charging_stalled": "Notify: Charging stalled",
-          "notify_sensor_unavailable": "Notify: Sensor unavailable"
+          "notify_sensor_unavailable": "Notify: Sensor unavailable",
+          "notify_battery_full": "Notify: Battery full",
+          "notify_battery_low": "Notify: Battery low",
+          "notify_surplus_load": "Notify: Surplus load switched",
+          "grid_export_power_sensor": "Grid export power sensor (instantaneous kW/W)"
+        }
+      },
+      "surplus_menu": {
+        "title": "Surplus Load Management",
+        "description": "{load_list}",
+        "menu_options": {
+          "surplus_add": "Add Load",
+          "surplus_remove": "Remove Load"
+        }
+      },
+      "surplus_add": {
+        "title": "Add Surplus Load",
+        "description": "Configure a new load to activate when solar surplus is available.",
+        "data": {
+          "name": "Load name",
+          "switch_entity": "Switch entity",
+          "power_kw": "Power draw (kW)",
+          "priority": "Priority (1 = highest)",
+          "battery_on_threshold": "Battery SOC to enable (%)",
+          "battery_off_threshold": "Battery SOC to disable (%)",
+          "margin_on_kw": "Extra surplus to turn ON (kW)",
+          "margin_off_kw": "Deficit margin to turn OFF (kW)",
+          "min_switch_interval": "Min switch interval (seconds)"
+        }
+      },
+      "surplus_remove": {
+        "title": "Remove Surplus Load",
+        "description": "Select a load to remove.",
+        "data": {
+          "load_to_remove": "Load to remove"
         }
       }
     },
@@ -153,7 +198,9 @@
       "planned_vs_actual_charge": { "name": "Planned vs Actual Charge" },
       "weekly_charging_cost": { "name": "Weekly Charging Cost" },
       "charging_savings": { "name": "Charging Savings" },
-      "bms_battery_capacity": { "name": "BMS Battery Capacity" }
+      "bms_battery_capacity": { "name": "BMS Battery Capacity" },
+      "surplus_forecast": { "name": "Surplus Forecast" },
+      "surplus_load_status": { "name": "Surplus Load Status" }
     },
     "binary_sensor": {
       "charging_active": { "name": "Charging Active" },
