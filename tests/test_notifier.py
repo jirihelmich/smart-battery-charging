@@ -37,13 +37,13 @@ for mod_name in [
 _COMPONENTS_DIR = Path(__file__).parent.parent / "custom_components"
 sys.path.insert(0, str(_COMPONENTS_DIR))
 
-from smart_battery_charging.models import (
+from smart_energy_manager.models import (
     ChargingSchedule,
     ChargingSession,
     EnergyDeficit,
 )
-from smart_battery_charging import notifier as _notifier_mod
-from smart_battery_charging.notifier import ChargingNotifier
+from smart_energy_manager import notifier as _notifier_mod
+from smart_energy_manager.notifier import ChargingNotifier
 
 
 @pytest.fixture(autouse=True)

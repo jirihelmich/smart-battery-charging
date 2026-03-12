@@ -1,6 +1,6 @@
 """Constants for the Smart Battery Charging integration."""
 
-DOMAIN = "smart_battery_charging"
+DOMAIN = "smart_energy_manager"
 
 # Config flow steps
 CONF_INVERTER_TEMPLATE = "inverter_template"

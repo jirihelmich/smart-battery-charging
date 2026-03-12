@@ -51,7 +51,7 @@ You get a notification at each step. If solar covers tomorrow's consumption AND 
 
 ### Manual
 
-1. Copy the `custom_components/smart_battery_charging/` folder into your HA `config/custom_components/` directory
+1. Copy the `custom_components/smart_energy_manager/` folder into your HA `config/custom_components/` directory
 2. Restart Home Assistant
 3. Add the integration via **Settings → Devices & Services**
 
@@ -162,7 +162,7 @@ Once set up, everything runs automatically:
 
 ### The Master Switch
 
-The **Enabled** switch (`switch.smart_battery_charging_enabled`) is the master on/off. When turned off:
+The **Enabled** switch (`switch.smart_energy_manager_enabled`) is the master on/off. When turned off:
 
 - Any active charging is stopped immediately
 - The inverter is restored to Self Use Mode
@@ -384,7 +384,7 @@ Until 7 days of data are collected, the fallback value (default 20 kWh) is used 
 1. Check the **Enabled** switch — must be ON
 2. Check the **Night Charging Status** sensor — is it "Scheduled"?
 3. Check if tomorrow's prices are available in your price sensor's attributes
-4. Check HA logs for `smart_battery_charging` entries
+4. Check HA logs for `smart_energy_manager` entries
 5. Verify the inverter entities respond to service calls (try manually selecting Manual Mode)
 
 ### Prices "Not Available"

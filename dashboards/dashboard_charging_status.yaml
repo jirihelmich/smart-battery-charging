@@ -10,34 +10,34 @@ cards:
     title: Night Charging
     show_header_toggle: false
     entities:
-      - entity: sensor.smart_battery_charging_night_charging_status
+      - entity: sensor.smart_energy_manager_night_charging_status
         name: Status
-      - entity: switch.smart_battery_charging_enabled
+      - entity: switch.smart_energy_manager_enabled
         name: Automation Enabled
-      - entity: binary_sensor.smart_battery_charging_charging_active
+      - entity: binary_sensor.smart_energy_manager_charging_active
         name: Charging Now
 
   # Schedule details - only shown when charging is scheduled
   - type: conditional
     conditions:
       - condition: state
-        entity: sensor.smart_battery_charging_night_charging_status
+        entity: sensor.smart_energy_manager_night_charging_status
         state: Scheduled
     card:
       type: entities
       title: Tonight's Schedule
       entities:
-        - entity: sensor.smart_battery_charging_night_charging_status
+        - entity: sensor.smart_energy_manager_night_charging_status
           type: attribute
           attribute: schedule_start
           name: Start Hour
           icon: mdi:clock-start
-        - entity: sensor.smart_battery_charging_night_charging_status
+        - entity: sensor.smart_energy_manager_night_charging_status
           type: attribute
           attribute: schedule_end
           name: End Hour
           icon: mdi:clock-end
-        - entity: sensor.smart_battery_charging_night_charging_status
+        - entity: sensor.smart_energy_manager_night_charging_status
           type: attribute
           attribute: charge_needed
           name: Required Charge (kWh)
@@ -49,15 +49,15 @@ cards:
     show_state: true
     show_name: true
     entities:
-      - entity: sensor.smart_battery_charging_last_night_charge_kwh
+      - entity: sensor.smart_energy_manager_last_night_charge_kwh
         name: Charged
-      - entity: sensor.smart_battery_charging_last_charge_battery_range
+      - entity: sensor.smart_energy_manager_last_charge_battery_range
         name: Battery
         icon: mdi:battery-arrow-up
-      - entity: sensor.smart_battery_charging_last_charge_time_range
+      - entity: sensor.smart_energy_manager_last_charge_time_range
         name: Time
         icon: mdi:clock-outline
-      - entity: sensor.smart_battery_charging_last_charge_total_cost
+      - entity: sensor.smart_energy_manager_last_charge_total_cost
         name: Cost
 
   # Battery and forecast overview
@@ -68,15 +68,15 @@ cards:
     entities:
       - entity: sensor.solax_inverter_battery_capacity
         name: Battery
-      - entity: sensor.smart_battery_charging_average_daily_consumption
+      - entity: sensor.smart_energy_manager_average_daily_consumption
         name: Avg Use
-      - entity: sensor.smart_battery_charging_tomorrow_solar_forecast
+      - entity: sensor.smart_energy_manager_tomorrow_solar_forecast
         name: Solar tmrw
-      - entity: sensor.smart_battery_charging_solar_forecast_error_average
+      - entity: sensor.smart_energy_manager_solar_forecast_error_average
         name: Fcst Error
-      - entity: sensor.smart_battery_charging_tomorrow_energy_forecast
+      - entity: sensor.smart_energy_manager_tomorrow_energy_forecast
         name: Deficit
-      - entity: sensor.smart_battery_charging_electricity_price_status
+      - entity: sensor.smart_energy_manager_electricity_price_status
         name: Price
 
   # Current price gauge

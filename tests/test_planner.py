@@ -35,11 +35,11 @@ for mod_name in [
 _COMPONENTS_DIR = Path(__file__).parent.parent / "custom_components"
 sys.path.insert(0, str(_COMPONENTS_DIR))
 
-from smart_battery_charging.consumption_tracker import ConsumptionTracker
-from smart_battery_charging.forecast_corrector import ForecastCorrector
-from smart_battery_charging.models import EnergyDeficit, OvernightNeed, SurplusForecast
-from smart_battery_charging.planner import ChargingPlanner
-from smart_battery_charging.price_analyzer import PriceAnalyzer, PriceSlot, PriceWindow
+from smart_energy_manager.consumption_tracker import ConsumptionTracker
+from smart_energy_manager.forecast_corrector import ForecastCorrector
+from smart_energy_manager.models import EnergyDeficit, OvernightNeed, SurplusForecast
+from smart_energy_manager.planner import ChargingPlanner
+from smart_energy_manager.price_analyzer import PriceAnalyzer, PriceSlot, PriceWindow
 
 # Fixed test time: Wednesday 2026-02-25 20:00 (Thursday tomorrow — not weekend)
 _TEST_NOW = datetime(2026, 2, 25, 20, 0, 0)
@@ -1356,7 +1356,7 @@ class TestEvaluatePredictiveLoad:
     """Test evaluate_predictive_load() for predictive surplus loads."""
 
     def _make_predictive_load(self, power_kw=1.5, start=5, end=8):
-        from smart_battery_charging.models import SurplusLoadConfig
+        from smart_energy_manager.models import SurplusLoadConfig
         return SurplusLoadConfig(
             name="Floor Heating",
             switch_entity="switch.floor_heating",
@@ -1368,7 +1368,7 @@ class TestEvaluatePredictiveLoad:
         )
 
     def _make_reactive_load(self, power_kw=2.3, priority=1):
-        from smart_battery_charging.models import SurplusLoadConfig
+        from smart_energy_manager.models import SurplusLoadConfig
         return SurplusLoadConfig(
             name="Water Heater",
             switch_entity="switch.water_heater",

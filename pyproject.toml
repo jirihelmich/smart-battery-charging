@@ -1,7 +1,7 @@
 [project]
-name = "smart-battery-charging"
+name = "smart-energy-manager"
 version = "0.3.0"
-description = "Smart Battery Charging integration for Home Assistant"
+description = "Smart Energy Manager integration for Home Assistant"
 requires-python = ">=3.12"
 
 [tool.pytest.ini_options]

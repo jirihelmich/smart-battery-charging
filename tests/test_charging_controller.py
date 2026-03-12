@@ -35,9 +35,9 @@ for mod_name in [
 _COMPONENTS_DIR = Path(__file__).parent.parent / "custom_components"
 sys.path.insert(0, str(_COMPONENTS_DIR))
 
-from smart_battery_charging.charging_controller import ChargingStateMachine
-from smart_battery_charging.const import STALL_ABORT_TICKS, STALL_RETRY_TICKS, START_FAILURE_MAX_RETRIES
-from smart_battery_charging.models import ChargingSchedule, ChargingState
+from smart_energy_manager.charging_controller import ChargingStateMachine
+from smart_energy_manager.const import STALL_ABORT_TICKS, STALL_RETRY_TICKS, START_FAILURE_MAX_RETRIES
+from smart_energy_manager.models import ChargingSchedule, ChargingState
 
 
 def _make_schedule(start_hour=1, end_hour=3, target_soc=80.0, avg_price=1.5):

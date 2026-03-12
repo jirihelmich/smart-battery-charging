@@ -26,7 +26,7 @@ A Home Assistant custom integration for automated battery charging during cheape
 
 ### Manual
 
-1. Copy `custom_components/smart_battery_charging/` to your HA `custom_components/` directory
+1. Copy `custom_components/smart_energy_manager/` to your HA `custom_components/` directory
 2. Restart Home Assistant
 3. Add the integration via Settings > Devices & Services
 

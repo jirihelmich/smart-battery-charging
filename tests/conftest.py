@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 # Add the component directory to the path so we can import pure-logic modules directly
-_COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "smart_battery_charging"
+_COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "smart_energy_manager"
 sys.path.insert(0, str(_COMPONENT_DIR))
 
 from consumption_tracker import ConsumptionTracker

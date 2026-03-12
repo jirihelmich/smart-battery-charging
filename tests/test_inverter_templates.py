@@ -34,8 +34,8 @@ for mod_name in [
 _COMPONENTS_DIR = Path(__file__).parent.parent / "custom_components"
 sys.path.insert(0, str(_COMPONENTS_DIR))
 
-from smart_battery_charging.inverters import INVERTER_TEMPLATES, get_template
-from smart_battery_charging.models import InverterTemplate
+from smart_energy_manager.inverters import INVERTER_TEMPLATES, get_template
+from smart_energy_manager.models import InverterTemplate
 
 
 class TestInverterTemplates:

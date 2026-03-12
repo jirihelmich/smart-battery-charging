@@ -35,8 +35,8 @@ for mod_name in [
 _COMPONENTS_DIR = Path(__file__).parent.parent / "custom_components"
 sys.path.insert(0, str(_COMPONENTS_DIR))
 
-from smart_battery_charging.models import SurplusLoadConfig, SurplusLoadState
-from smart_battery_charging.surplus_controller import (
+from smart_energy_manager.models import SurplusLoadConfig, SurplusLoadState
+from smart_energy_manager.surplus_controller import (
     SurplusLoadController,
     _load_configs_from_options,
 )
