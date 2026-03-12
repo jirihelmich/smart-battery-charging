@@ -735,26 +735,52 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
     ) -> FlowResult:
         """Configure schedule for a predictive surplus load."""
         if user_input is not None:
-            self._pending_load["schedule_start_hour"] = user_input["schedule_start_hour"]
-            self._pending_load["schedule_end_hour"] = user_input["schedule_end_hour"]
-            self._pending_load["evaluation_lead_minutes"] = user_input.get(
-                "evaluation_lead_minutes", DEFAULT_PREDICTIVE_LEAD_MINUTES
-            )
+            self._pending_load["schedule_start_hour"] = int(user_input["schedule_start_hour"])
+            self._pending_load["schedule_end_hour"] = int(user_input["schedule_end_hour"])
+            self._pending_load["evaluation_lead_minutes"] = int(user_input.get(
+                "evaluation_lead_minutes", str(DEFAULT_PREDICTIVE_LEAD_MINUTES)
+            ))
             return self._save_pending_load()
 
+        hour_options = [
+            selector.SelectOptionDict(value=str(h), label=f"{h:02d}:00")
+            for h in range(24)
+        ]
+        lead_options = [
+            selector.SelectOptionDict(value=str(m), label=f"{m} min")
+            for m in [15, 30, 45, 60, 90, 120]
+        ]
         return self.async_show_form(
             step_id="surplus_add_predictive",
             data_schema=vol.Schema(
                 {
                     vol.Required(
-                        "schedule_start_hour", default=DEFAULT_PREDICTIVE_SCHEDULE_START
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+                        "schedule_start_hour",
+                        default=str(DEFAULT_PREDICTIVE_SCHEDULE_START),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=hour_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                     vol.Required(
-                        "schedule_end_hour", default=DEFAULT_PREDICTIVE_SCHEDULE_END
-                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
-                    vol.Optional(
-                        "evaluation_lead_minutes", default=DEFAULT_PREDICTIVE_LEAD_MINUTES
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=120)),
+                        "schedule_end_hour",
+                        default=str(DEFAULT_PREDICTIVE_SCHEDULE_END),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=hour_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Required(
+                        "evaluation_lead_minutes",
+                        default=str(DEFAULT_PREDICTIVE_LEAD_MINUTES),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=lead_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
         )

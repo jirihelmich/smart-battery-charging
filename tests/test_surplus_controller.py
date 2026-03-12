@@ -58,6 +58,11 @@ def _make_coordinator(
     coord.store = MagicMock()
     coord.store.surplus_runtime_history = []
     coord.async_record_surplus_runtime = AsyncMock()
+    # Planner mock for surplus forecast (used by midnight recording)
+    forecast_mock = MagicMock()
+    forecast_mock.surplus_hours = 7
+    coord.planner = MagicMock()
+    coord.planner.forecast_today_surplus = MagicMock(return_value=forecast_mock)
     return coord
 
 
@@ -409,7 +414,7 @@ class TestMidnight:
         await ctrl.async_on_midnight()
 
         coord.async_record_surplus_runtime.assert_called_once_with(
-            {"Water Heater": 2.0}  # 7200s = 2h
+            {"Water Heater": 2.0}, surplus_hours=7  # 7200s = 2h
         )
         # Runtime reset
         assert ctrl._states["switch.water_heater"].daily_runtime_seconds == 0.0
@@ -430,6 +435,66 @@ class TestMidnight:
 
         assert ctrl._states["switch.floor_heating"].predictive_approved is None
         assert ctrl._states["switch.floor_heating"].predictive_aborted is False
+
+
+class TestUtilizationFactors:
+    """Tests for historical utilization factor computation."""
+
+    def test_no_history_returns_empty(self):
+        hass = _make_hass()
+        coord = _make_coordinator(surplus_loads=[WATER_HEATER_LOAD])
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        assert ctrl.get_utilization_factors() == {}
+
+    def test_single_day_history(self):
+        hass = _make_hass()
+        coord = _make_coordinator(surplus_loads=[WATER_HEATER_LOAD])
+        coord.store.surplus_runtime_history = [
+            {"date": "2026-03-11", "loads": {"Water Heater": 4.0}, "surplus_hours": 8},
+        ]
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        factors = ctrl.get_utilization_factors()
+        assert factors == {"Water Heater": 0.5}  # 4h / 8h
+
+    def test_multi_day_average(self):
+        hass = _make_hass()
+        coord = _make_coordinator(surplus_loads=[WATER_HEATER_LOAD])
+        coord.store.surplus_runtime_history = [
+            {"date": "2026-03-11", "loads": {"Water Heater": 4.0}, "surplus_hours": 8},
+            {"date": "2026-03-10", "loads": {"Water Heater": 6.0}, "surplus_hours": 8},
+        ]
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        factors = ctrl.get_utilization_factors()
+        # (4/8 + 6/8) / 2 = (0.5 + 0.75) / 2 = 0.625
+        assert factors == {"Water Heater": 0.62}
+
+    def test_capped_at_one(self):
+        """Runtime can exceed surplus hours (e.g. manual runs), cap at 1.0."""
+        hass = _make_hass()
+        coord = _make_coordinator(surplus_loads=[WATER_HEATER_LOAD])
+        coord.store.surplus_runtime_history = [
+            {"date": "2026-03-11", "loads": {"Water Heater": 12.0}, "surplus_hours": 8},
+        ]
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        factors = ctrl.get_utilization_factors()
+        assert factors == {"Water Heater": 1.0}
+
+    def test_zero_surplus_hours_skipped(self):
+        """Days with zero surplus hours should not affect utilization."""
+        hass = _make_hass()
+        coord = _make_coordinator(surplus_loads=[WATER_HEATER_LOAD])
+        coord.store.surplus_runtime_history = [
+            {"date": "2026-03-11", "loads": {"Water Heater": 0.0}, "surplus_hours": 0},
+            {"date": "2026-03-10", "loads": {"Water Heater": 4.0}, "surplus_hours": 8},
+        ]
+        ctrl = SurplusLoadController(hass, coord)
+        ctrl.load_configs()
+        factors = ctrl.get_utilization_factors()
+        assert factors == {"Water Heater": 0.5}
 
 
 PREDICTIVE_FLOOR_HEATING = {

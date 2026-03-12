@@ -576,14 +576,17 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.store.async_set_bms_capacity_history(new_history[:BMS_CAPACITY_HISTORY_DAYS])
         _LOGGER.info("Recorded BMS capacity: %.2f kWh", capacity)
 
-    async def async_record_surplus_runtime(self, runtime_data: dict[str, float]) -> None:
+    async def async_record_surplus_runtime(
+        self, runtime_data: dict[str, float], *, surplus_hours: int = 0
+    ) -> None:
         """Record daily surplus load runtimes (called at midnight)."""
         now = dt_util.now()
         today_str = now.strftime("%Y-%m-%d")
 
-        entry = {
+        entry: dict[str, Any] = {
             "date": today_str,
             "loads": runtime_data,
+            "surplus_hours": surplus_hours,
         }
 
         history = self.store.surplus_runtime_history
@@ -839,14 +842,30 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data["surplus_forecast_peak_kw"] = surplus_forecast.peak_surplus_kw
                 data["surplus_forecast_battery_full_hour"] = surplus_forecast.battery_full_hour
                 data["surplus_forecast_hourly"] = surplus_forecast.hourly_kwh
-                # Predicted runtime per load
+                # Predicted runtime per load — simulate hour-by-hour sharing
+                # Reactive loads: shown with full hours (surplus covers their power)
+                # but only *claim* power_kw * utilization_factor from the pool,
+                # so lower-priority loads benefit from historical underutilization.
                 if self.surplus_controller and self.surplus_controller.configs:
-                    load_runtimes: dict[str, float] = {}
-                    for cfg in self.surplus_controller.configs:
-                        if cfg.power_kw > 0:
-                            hours = surplus_forecast.total_kwh / cfg.power_kw
-                            load_runtimes[cfg.name] = round(hours, 1)
-                    data["surplus_predicted_runtimes"] = load_runtimes
+                    configs = sorted(
+                        self.surplus_controller.configs, key=lambda c: c.priority
+                    )
+                    factors = self.surplus_controller.get_utilization_factors()
+                    load_runtimes: dict[str, float] = {c.name: 0.0 for c in configs}
+                    for _hour, kwh in sorted(surplus_forecast.hourly_kwh.items()):
+                        remaining = kwh
+                        for cfg in configs:
+                            if remaining <= 0:
+                                break
+                            if remaining >= cfg.power_kw:
+                                load_runtimes[cfg.name] += 1.0
+                                # Claim only historical usage from pool
+                                factor = factors.get(cfg.name, 1.0)
+                                remaining -= cfg.power_kw * factor
+                    data["surplus_predicted_runtimes"] = {
+                        name: round(hours, 1)
+                        for name, hours in load_runtimes.items()
+                    }
                 else:
                     data["surplus_predicted_runtimes"] = {}
             except Exception:

@@ -996,17 +996,15 @@ views:
               'load_details') or [] %}
               {% if details | length == 0 %}
               *No surplus loads configured.*
-
               Go to Settings → Devices → Smart Battery Charging → Configure →
               Surplus Load Management to add loads.
               {% else %}
-              | Load | Power | Priority | Status | Today |
-              |------|-------|----------|--------|-------|
-              {% for d in details %}
-              | {{ d.name }} | {{ d.power_kw }} kW | {{ d.priority }} | {{
-              '🟢 ON' if d.is_running else '⚪ OFF' }} | {{ d.runtime_today_h
-              }}h |
-              {% endfor %}
+              <table width="100%" cellspacing="0" cellpadding="8">
+              <tr><th align="left">Load</th><th>Power</th><th>Mode</th><th>Status</th><th>Today</th></tr>
+              {%- for d in details %}
+              <tr><td align="left">{{ d.name }}</td><td>{{ d.power_kw }} kW</td><td>{{ d.mode | title }}</td><td>{% if d.is_device_on and d.controlled_by_automation %}🟢 Auto{% elif d.is_device_on %}🟡 Manual{% else %}⚪ OFF{% endif %}</td><td>{{ d.runtime_today_h }}h</td></tr>
+              {%- endfor %}
+              </table>
               {% endif %}
             grid_options:
               columns: 12
@@ -1024,9 +1022,11 @@ views:
               **{{ "Tomorrow" if day == "tomorrow" else "Today" }}: {{ surplus }} kWh** surplus over **{{ hours }}** hours{% if full_hour is not none %} (battery full at {{ full_hour }}:00){% endif %}
 
               {% if runtimes | length > 0 %}
-              {% for name, h in runtimes.items() %}
+              {%- for name, h in runtimes.items() %}
+
               - **{{ name }}**: ~{{ h }}h
-              {% endfor %}
+
+              {%- endfor %}
               {% else %}
               No loads configured.
               {% endif %}

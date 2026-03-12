@@ -163,6 +163,7 @@ class SurplusLoadState:
     """Mutable runtime state for a single surplus load."""
 
     is_running: bool = False
+    controlled_by_automation: bool = False  # True when turned on/off by the controller
     last_switch_time: float = 0.0  # timestamp
     daily_runtime_seconds: float = 0.0  # today's accumulated runtime
     last_tick_time: float = 0.0  # for runtime accumulation

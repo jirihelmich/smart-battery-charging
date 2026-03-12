@@ -106,12 +106,25 @@ class SurplusLoadController:
                 self._states[entity_id].daily_runtime_seconds = data.get("daily_runtime_seconds", 0.0)
 
     def _sync_actual_switch_states(self) -> None:
-        """Read actual switch states from HA (handles restart recovery)."""
+        """Sync is_running with actual HA switch states.
+
+        Also detects manual changes: if a device was turned on/off externally,
+        clear the controlled_by_automation flag.
+        """
         for cfg in self._configs:
             state = self._hass.states.get(cfg.switch_entity)
             if state is not None:
                 actual_on = state.state == "on"
-                self._states[cfg.switch_entity].is_running = actual_on
+                st = self._states[cfg.switch_entity]
+                if actual_on != st.is_running:
+                    # State changed externally — not controlled by automation
+                    st.controlled_by_automation = False
+                st.is_running = actual_on
+
+    def _is_device_on(self, entity_id: str) -> bool:
+        """Read actual switch state from HA."""
+        state = self._hass.states.get(entity_id)
+        return state is not None and state.state == "on"
 
     @property
     def configs(self) -> list[SurplusLoadConfig]:
@@ -148,7 +161,7 @@ class SurplusLoadController:
         running_power = sum(
             cfg.power_kw
             for cfg in self._configs
-            if self._states.get(cfg.switch_entity, SurplusLoadState()).is_running
+            if self._is_device_on(cfg.switch_entity)
         )
         return grid_export_kw + running_power
 
@@ -208,8 +221,9 @@ class SurplusLoadController:
             )
 
             try:
+                factors = self.get_utilization_factors()
                 evaluation = planner.evaluate_predictive_load(
-                    cfg, reactive, now=now
+                    cfg, reactive, now=now, utilization_factors=factors
                 )
             except Exception:
                 _LOGGER.exception("Failed to evaluate predictive load '%s'", cfg.name)
@@ -256,6 +270,7 @@ class SurplusLoadController:
                             domain, "turn_on", {"entity_id": cfg.switch_entity}
                         )
                         st.is_running = True
+                        st.controlled_by_automation = True
                         st.last_switch_time = monotonic_now
                         _LOGGER.info(
                             "Predictive: %s turn on (schedule %02d:00-%02d:00, SOC=%.0f%%)",
@@ -274,8 +289,10 @@ class SurplusLoadController:
                     if planner is not None:
                         try:
                             reactive = self._reactive_configs()
+                            factors = self.get_utilization_factors()
                             evaluation = planner.evaluate_predictive_load(
-                                cfg, reactive, now=now
+                                cfg, reactive, now=now,
+                                utilization_factors=factors,
                             )
                             if not evaluation.approved:
                                 _LOGGER.warning(
@@ -289,6 +306,7 @@ class SurplusLoadController:
                                         domain, "turn_off", {"entity_id": cfg.switch_entity}
                                     )
                                     st.is_running = False
+                                    st.controlled_by_automation = True
                                     st.last_switch_time = monotonic_now
                                     if self._notifier and self._coordinator._opt(
                                         CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD
@@ -309,6 +327,7 @@ class SurplusLoadController:
                         domain, "turn_off", {"entity_id": cfg.switch_entity}
                     )
                     st.is_running = False
+                    st.controlled_by_automation = True
                     st.last_switch_time = monotonic_now
                     _LOGGER.info(
                         "Predictive: %s turn off (schedule ended, SOC=%.0f%%)",
@@ -334,10 +353,10 @@ class SurplusLoadController:
         monotonic_now = time.monotonic()
         now = self._get_now()
 
-        # Sync with actual HA switch states
+        # Sync with actual HA switch states (detects manual changes)
         self._sync_actual_switch_states()
 
-        # Accumulate runtime for running loads
+        # Accumulate runtime for running loads (uses actual device state)
         for cfg in self._configs:
             st = self._states[cfg.switch_entity]
             if st.is_running and st.last_tick_time > 0:
@@ -427,6 +446,7 @@ class SurplusLoadController:
                     domain, action, {"entity_id": cfg.switch_entity}
                 )
                 st.is_running = want_on
+                st.controlled_by_automation = True
                 st.last_switch_time = monotonic_now
                 _LOGGER.info(
                     "Surplus: %s %s (surplus=%.2f kW, SOC=%.0f%%)",
@@ -443,6 +463,34 @@ class SurplusLoadController:
             except Exception:
                 _LOGGER.exception("Failed to %s %s", action, cfg.switch_entity)
 
+    def get_utilization_factors(self) -> dict[str, float]:
+        """Compute average utilization factor per load from history.
+
+        Utilization = avg(runtime_hours / surplus_hours) over historical days.
+        Returns a factor between 0.0 and 1.0 per load name.
+        Falls back to 1.0 (conservative) when no history exists.
+        """
+        history = self._coordinator.store.surplus_runtime_history
+        if not history:
+            return {}
+
+        # Accumulate runtime and surplus hours per load
+        load_totals: dict[str, list[float]] = {}
+        for entry in history:
+            surplus_hours = entry.get("surplus_hours", 0)
+            if surplus_hours <= 0:
+                continue
+            loads = entry.get("loads", {})
+            for name, runtime_h in loads.items():
+                factor = min(1.0, runtime_h / surplus_hours)
+                load_totals.setdefault(name, []).append(factor)
+
+        return {
+            name: round(sum(factors) / len(factors), 2)
+            for name, factors in load_totals.items()
+            if factors
+        }
+
     async def async_on_midnight(self) -> None:
         """Reset daily runtime counters, predictive state, and persist history."""
         runtime_data: dict[str, float] = {}
@@ -455,8 +503,19 @@ class SurplusLoadController:
             st.predictive_approved = None
             st.predictive_aborted = False
 
+        # Record surplus hours from today's forecast
+        surplus_hours = 0
+        if self._coordinator.planner:
+            try:
+                forecast = self._coordinator.planner.forecast_today_surplus()
+                surplus_hours = forecast.surplus_hours
+            except Exception:
+                _LOGGER.debug("Could not get today's surplus hours for history")
+
         if runtime_data:
-            await self._coordinator.async_record_surplus_runtime(runtime_data)
+            await self._coordinator.async_record_surplus_runtime(
+                runtime_data, surplus_hours=surplus_hours
+            )
 
     def get_states_for_storage(self) -> dict[str, Any]:
         """Serialize runtime states for persistence."""
@@ -477,6 +536,7 @@ class SurplusLoadController:
         load_details = []
         for cfg in self._configs:
             st = self._states.get(cfg.switch_entity, SurplusLoadState())
+            device_on = self._is_device_on(cfg.switch_entity)
             if st.is_running:
                 active_loads.append(cfg.name)
             detail: dict[str, Any] = {
@@ -485,6 +545,8 @@ class SurplusLoadController:
                 "power_kw": cfg.power_kw,
                 "priority": cfg.priority,
                 "is_running": st.is_running,
+                "is_device_on": device_on,
+                "controlled_by_automation": st.controlled_by_automation,
                 "runtime_today_h": round(st.daily_runtime_seconds / 3600, 2),
                 "mode": cfg.mode,
             }

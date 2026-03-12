@@ -512,6 +512,7 @@ class ChargingPlanner:
         reactive_loads: list[SurplusLoadConfig],
         *,
         now: datetime | None = None,
+        utilization_factors: dict[str, float] | None = None,
     ) -> PredictiveEvaluation:
         """Evaluate whether a predictive load should run today.
 
@@ -567,10 +568,12 @@ class ChargingPlanner:
                 overflow = soc_kwh - max_soc_kwh
                 soc_kwh = max_soc_kwh
 
-                # Reactive loads claim surplus by priority
+                # Reactive loads claim surplus by priority (scaled by utilization)
                 remaining = overflow
+                factors = utilization_factors or {}
                 for rl in sorted(reactive_loads, key=lambda x: x.priority):
-                    claim = min(remaining, rl.power_kw)
+                    factor = factors.get(rl.name, 1.0)
+                    claim = min(remaining, rl.power_kw * factor)
                     reactive_claim_total += claim
                     remaining -= claim
                     if remaining <= 0:

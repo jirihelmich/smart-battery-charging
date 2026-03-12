@@ -166,9 +166,9 @@
         "title": "Predictive Load Schedule",
         "description": "Set the daily schedule for this load. It will run during these hours if the solar forecast shows enough surplus to recharge the battery afterwards.",
         "data": {
-          "schedule_start_hour": "Schedule start hour",
-          "schedule_end_hour": "Schedule end hour",
-          "evaluation_lead_minutes": "Evaluate minutes before start"
+          "schedule_start_hour": "Start time",
+          "schedule_end_hour": "End time",
+          "evaluation_lead_minutes": "Evaluate forecast before start"
         }
       },
       "surplus_remove": {
@@ -217,7 +217,6 @@
       "charging_recommended": { "name": "Charging Recommended" }
     },
     "number": {
-      "battery_capacity": { "name": "Battery Capacity" },
       "max_charge_level": { "name": "Max Charge Level" },
       "min_soc": { "name": "Min SOC" },
       "max_charge_power": { "name": "Max Charge Power" },
