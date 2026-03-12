@@ -151,6 +151,7 @@ class SurplusLoadConfig:
     margin_on_kw: float = 0.3  # Extra surplus above power_kw to turn ON
     margin_off_kw: float = 0.5  # Deficit below 0 to turn OFF
     min_switch_interval: int = 300  # Seconds between switches (anti-flap)
+    power_sensor: str = ""  # Optional: real-time power consumption sensor
     # Predictive mode fields
     mode: str = "reactive"  # "reactive" or "predictive"
     schedule_start_hour: int = 5  # Hour to start the load (predictive only)
@@ -166,6 +167,7 @@ class SurplusLoadState:
     controlled_by_automation: bool = False  # True when turned on/off by the controller
     last_switch_time: float = 0.0  # timestamp
     daily_runtime_seconds: float = 0.0  # today's accumulated runtime
+    daily_energy_kwh: float = 0.0  # today's accumulated energy (from power sensor)
     last_tick_time: float = 0.0  # for runtime accumulation
     # Predictive mode state
     predictive_approved: bool | None = None  # None=not evaluated, True/False

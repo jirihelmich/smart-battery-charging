@@ -650,6 +650,7 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
 
         menu_options = ["surplus_add"]
         if loads:
+            menu_options.append("surplus_edit")
             menu_options.append("surplus_remove")
 
         # Build description showing current loads
@@ -679,6 +680,7 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                 "name": user_input["name"],
                 "switch_entity": user_input["switch_entity"],
                 "power_kw": user_input["power_kw"],
+                "power_sensor": user_input.get("power_sensor", ""),
                 "priority": user_input.get("priority", len(self._get_surplus_loads()) + 1),
                 "mode": user_input.get("mode", SURPLUS_MODE_REACTIVE),
                 "battery_on_threshold": user_input.get("battery_on_threshold", DEFAULT_SURPLUS_BATTERY_ON),
@@ -705,6 +707,7 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     vol.Required("power_kw"): vol.All(
                         vol.Coerce(float), vol.Range(min=0.1, max=50.0)
                     ),
+                    vol.Optional("power_sensor"): _entity_selector("sensor"),
                     vol.Optional("priority", default=next_priority): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=10)
                     ),
@@ -792,6 +795,168 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
         self._options[CONF_SURPLUS_LOADS] = loads
         return self.async_create_entry(
             title="", data={**self._config_entry.options, **self._options}
+        )
+
+    async def async_step_surplus_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Select a surplus load to edit."""
+        loads = self._get_surplus_loads()
+
+        if user_input is not None:
+            edit_name = user_input.get("load_to_edit", "")
+            for i, ld in enumerate(loads):
+                if ld["name"] == edit_name:
+                    self._editing_load_index = i
+                    self._pending_load = dict(ld)
+                    return await self.async_step_surplus_edit_form()
+            return await self.async_step_surplus_menu()
+
+        load_names = [ld["name"] for ld in loads]
+        if not load_names:
+            return await self.async_step_surplus_menu()
+
+        return self.async_show_form(
+            step_id="surplus_edit",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("load_to_edit"): _select_selector(load_names),
+                }
+            ),
+        )
+
+    async def async_step_surplus_edit_form(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Edit a surplus load's configuration."""
+        ld = self._pending_load
+
+        if user_input is not None:
+            updated = {
+                "name": user_input["name"],
+                "switch_entity": user_input["switch_entity"],
+                "power_kw": user_input["power_kw"],
+                "power_sensor": user_input.get("power_sensor", ""),
+                "priority": user_input.get("priority", ld.get("priority", 1)),
+                "mode": user_input.get("mode", ld.get("mode", SURPLUS_MODE_REACTIVE)),
+                "battery_on_threshold": user_input.get("battery_on_threshold", ld.get("battery_on_threshold", DEFAULT_SURPLUS_BATTERY_ON)),
+                "battery_off_threshold": user_input.get("battery_off_threshold", ld.get("battery_off_threshold", DEFAULT_SURPLUS_BATTERY_OFF)),
+                "margin_on_kw": user_input.get("margin_on_kw", ld.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON)),
+                "margin_off_kw": user_input.get("margin_off_kw", ld.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF)),
+                "min_switch_interval": user_input.get("min_switch_interval", ld.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL)),
+            }
+            # Preserve predictive fields
+            if updated["mode"] == SURPLUS_MODE_PREDICTIVE:
+                updated["schedule_start_hour"] = ld.get("schedule_start_hour", DEFAULT_PREDICTIVE_SCHEDULE_START)
+                updated["schedule_end_hour"] = ld.get("schedule_end_hour", DEFAULT_PREDICTIVE_SCHEDULE_END)
+                updated["evaluation_lead_minutes"] = ld.get("evaluation_lead_minutes", DEFAULT_PREDICTIVE_LEAD_MINUTES)
+                self._pending_load = updated
+                # If mode changed to predictive, show schedule step
+                if ld.get("mode") != SURPLUS_MODE_PREDICTIVE:
+                    return await self.async_step_surplus_edit_predictive()
+
+            loads = self._get_surplus_loads()
+            loads[self._editing_load_index] = updated
+            self._options[CONF_SURPLUS_LOADS] = loads
+            return self.async_create_entry(
+                title="", data={**self._config_entry.options, **self._options}
+            )
+
+        return self.async_show_form(
+            step_id="surplus_edit_form",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("name", default=ld.get("name", "")): str,
+                    vol.Required("switch_entity", default=ld.get("switch_entity", "")): _entity_selector("switch"),
+                    vol.Required("power_kw", default=ld.get("power_kw", 1.0)): vol.All(
+                        vol.Coerce(float), vol.Range(min=0.1, max=50.0)
+                    ),
+                    vol.Optional("power_sensor", default=ld.get("power_sensor", "")): _entity_selector("sensor"),
+                    vol.Optional("priority", default=ld.get("priority", 1)): vol.All(
+                        vol.Coerce(int), vol.Range(min=1, max=10)
+                    ),
+                    vol.Optional("mode", default=ld.get("mode", SURPLUS_MODE_REACTIVE)): _select_selector(
+                        [SURPLUS_MODE_REACTIVE, SURPLUS_MODE_PREDICTIVE]
+                    ),
+                    vol.Optional(
+                        "battery_on_threshold", default=ld.get("battery_on_threshold", DEFAULT_SURPLUS_BATTERY_ON)
+                    ): vol.All(vol.Coerce(float), vol.Range(min=50.0, max=100.0)),
+                    vol.Optional(
+                        "battery_off_threshold", default=ld.get("battery_off_threshold", DEFAULT_SURPLUS_BATTERY_OFF)
+                    ): vol.All(vol.Coerce(float), vol.Range(min=50.0, max=100.0)),
+                    vol.Optional(
+                        "margin_on_kw", default=ld.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON)
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=5.0)),
+                    vol.Optional(
+                        "margin_off_kw", default=ld.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF)
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=5.0)),
+                    vol.Optional(
+                        "min_switch_interval", default=ld.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL)
+                    ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
+                }
+            ),
+        )
+
+    async def async_step_surplus_edit_predictive(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Edit predictive schedule for a surplus load."""
+        ld = self._pending_load
+
+        if user_input is not None:
+            ld["schedule_start_hour"] = int(user_input["schedule_start_hour"])
+            ld["schedule_end_hour"] = int(user_input["schedule_end_hour"])
+            ld["evaluation_lead_minutes"] = int(user_input.get(
+                "evaluation_lead_minutes", str(DEFAULT_PREDICTIVE_LEAD_MINUTES)
+            ))
+            loads = self._get_surplus_loads()
+            loads[self._editing_load_index] = ld
+            self._options[CONF_SURPLUS_LOADS] = loads
+            return self.async_create_entry(
+                title="", data={**self._config_entry.options, **self._options}
+            )
+
+        hour_options = [
+            selector.SelectOptionDict(value=str(h), label=f"{h:02d}:00")
+            for h in range(24)
+        ]
+        lead_options = [
+            selector.SelectOptionDict(value=str(m), label=f"{m} min")
+            for m in [15, 30, 45, 60, 90, 120]
+        ]
+        return self.async_show_form(
+            step_id="surplus_edit_predictive",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "schedule_start_hour",
+                        default=str(ld.get("schedule_start_hour", DEFAULT_PREDICTIVE_SCHEDULE_START)),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=hour_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Required(
+                        "schedule_end_hour",
+                        default=str(ld.get("schedule_end_hour", DEFAULT_PREDICTIVE_SCHEDULE_END)),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=hour_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Required(
+                        "evaluation_lead_minutes",
+                        default=str(ld.get("evaluation_lead_minutes", DEFAULT_PREDICTIVE_LEAD_MINUTES)),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=lead_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                }
+            ),
         )
 
     async def async_step_surplus_remove(

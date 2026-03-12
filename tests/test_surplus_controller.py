@@ -414,7 +414,7 @@ class TestMidnight:
         await ctrl.async_on_midnight()
 
         coord.async_record_surplus_runtime.assert_called_once_with(
-            {"Water Heater": 2.0}, surplus_hours=7  # 7200s = 2h
+            {"Water Heater": 2.0}, surplus_hours=7, energy_data={}  # 7200s = 2h
         )
         # Runtime reset
         assert ctrl._states["switch.water_heater"].daily_runtime_seconds == 0.0

@@ -577,9 +577,13 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.info("Recorded BMS capacity: %.2f kWh", capacity)
 
     async def async_record_surplus_runtime(
-        self, runtime_data: dict[str, float], *, surplus_hours: int = 0
+        self,
+        runtime_data: dict[str, float],
+        *,
+        surplus_hours: int = 0,
+        energy_data: dict[str, float] | None = None,
     ) -> None:
-        """Record daily surplus load runtimes (called at midnight)."""
+        """Record daily surplus load runtimes and energy (called at midnight)."""
         now = dt_util.now()
         today_str = now.strftime("%Y-%m-%d")
 
@@ -588,13 +592,15 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "loads": runtime_data,
             "surplus_hours": surplus_hours,
         }
+        if energy_data:
+            entry["energy_kwh"] = energy_data
 
         history = self.store.surplus_runtime_history
         new_history = [entry] + history
         await self.store.async_set_surplus_runtime_history(
             new_history[:SURPLUS_RUNTIME_HISTORY_DAYS]
         )
-        _LOGGER.info("Recorded surplus runtime: %s", runtime_data)
+        _LOGGER.info("Recorded surplus runtime: %s, energy: %s", runtime_data, energy_data)
 
     # --- Sensor health monitoring (H1) ---
 

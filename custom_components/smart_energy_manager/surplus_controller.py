@@ -60,6 +60,7 @@ def _load_configs_from_options(coordinator: SmartBatteryCoordinator) -> list[Sur
                 margin_on_kw=float(item.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON)),
                 margin_off_kw=float(item.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF)),
                 min_switch_interval=int(item.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL)),
+                power_sensor=str(item.get("power_sensor", "")),
                 mode=str(item.get("mode", "reactive")),
                 schedule_start_hour=int(item.get("schedule_start_hour", DEFAULT_PREDICTIVE_SCHEDULE_START)),
                 schedule_end_hour=int(item.get("schedule_end_hour", DEFAULT_PREDICTIVE_SCHEDULE_END)),
@@ -126,6 +127,25 @@ class SurplusLoadController:
         state = self._hass.states.get(entity_id)
         return state is not None and state.state == "on"
 
+    def _read_power_sensor(self, cfg: SurplusLoadConfig) -> float | None:
+        """Read real-time power from a load's power sensor (kW).
+
+        Returns None if no sensor configured or unavailable.
+        """
+        if not cfg.power_sensor:
+            return None
+        state = self._hass.states.get(cfg.power_sensor)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        try:
+            value = float(state.state)
+            uom = state.attributes.get("unit_of_measurement", "")
+            if uom in ("W", "w"):
+                value = value / 1000.0
+            return value
+        except (ValueError, TypeError):
+            return None
+
     @property
     def configs(self) -> list[SurplusLoadConfig]:
         return self._configs
@@ -152,14 +172,19 @@ class SurplusLoadController:
         except (ValueError, TypeError):
             return None
 
+    def _actual_power_kw(self, cfg: SurplusLoadConfig) -> float:
+        """Get actual power draw for a load (real sensor or fallback to configured max)."""
+        real = self._read_power_sensor(cfg)
+        return real if real is not None else cfg.power_kw
+
     def _compute_true_surplus(self, grid_export_kw: float) -> float:
         """Compute true surplus by adding back running loads' consumption.
 
-        When a load is running, it reduces grid_export by its power_kw.
-        True surplus = grid_export + sum(running_load.power_kw).
+        When a load is running, it reduces grid_export by its actual power draw.
+        True surplus = grid_export + sum(running_load.actual_power).
         """
         running_power = sum(
-            cfg.power_kw
+            self._actual_power_kw(cfg)
             for cfg in self._configs
             if self._is_device_on(cfg.switch_entity)
         )
@@ -356,13 +381,17 @@ class SurplusLoadController:
         # Sync with actual HA switch states (detects manual changes)
         self._sync_actual_switch_states()
 
-        # Accumulate runtime for running loads (uses actual device state)
+        # Accumulate runtime and energy for running loads (uses actual device state)
         for cfg in self._configs:
             st = self._states[cfg.switch_entity]
             if st.is_running and st.last_tick_time > 0:
                 elapsed = monotonic_now - st.last_tick_time
                 if 0 < elapsed < 600:  # Sanity: max 10 min per tick
                     st.daily_runtime_seconds += elapsed
+                    # Accumulate energy from real power sensor
+                    real_power = self._read_power_sensor(cfg)
+                    power_kw = real_power if real_power is not None else cfg.power_kw
+                    st.daily_energy_kwh += power_kw * (elapsed / 3600)
             st.last_tick_time = monotonic_now
 
         # --- Predictive loads: evaluate and manage schedule ---
@@ -494,11 +523,15 @@ class SurplusLoadController:
     async def async_on_midnight(self) -> None:
         """Reset daily runtime counters, predictive state, and persist history."""
         runtime_data: dict[str, float] = {}
+        energy_data: dict[str, float] = {}
         for cfg in self._configs:
             st = self._states[cfg.switch_entity]
             if st.daily_runtime_seconds > 0:
                 runtime_data[cfg.name] = round(st.daily_runtime_seconds / 3600, 2)
+            if st.daily_energy_kwh > 0:
+                energy_data[cfg.name] = round(st.daily_energy_kwh, 2)
             st.daily_runtime_seconds = 0.0
+            st.daily_energy_kwh = 0.0
             # Reset predictive state for tomorrow
             st.predictive_approved = None
             st.predictive_aborted = False
@@ -514,7 +547,8 @@ class SurplusLoadController:
 
         if runtime_data:
             await self._coordinator.async_record_surplus_runtime(
-                runtime_data, surplus_hours=surplus_hours
+                runtime_data, surplus_hours=surplus_hours,
+                energy_data=energy_data,
             )
 
     def get_states_for_storage(self) -> dict[str, Any]:
@@ -539,15 +573,18 @@ class SurplusLoadController:
             device_on = self._is_device_on(cfg.switch_entity)
             if st.is_running:
                 active_loads.append(cfg.name)
+            real_power = self._read_power_sensor(cfg) if device_on else None
             detail: dict[str, Any] = {
                 "name": cfg.name,
                 "entity": cfg.switch_entity,
                 "power_kw": cfg.power_kw,
+                "actual_power_kw": round(real_power, 2) if real_power is not None else None,
                 "priority": cfg.priority,
                 "is_running": st.is_running,
                 "is_device_on": device_on,
                 "controlled_by_automation": st.controlled_by_automation,
                 "runtime_today_h": round(st.daily_runtime_seconds / 3600, 2),
+                "energy_today_kwh": round(st.daily_energy_kwh, 2),
                 "mode": cfg.mode,
             }
             if cfg.mode == SURPLUS_MODE_PREDICTIVE:
@@ -568,5 +605,6 @@ class SurplusLoadController:
             "surplus_grid_export_kw": round(grid_export, 2) if grid_export is not None else None,
             "surplus_true_surplus_kw": round(true_surplus, 2) if true_surplus is not None else None,
             "surplus_load_details": load_details,
+            "surplus_utilization_factors": self.get_utilization_factors(),
             "surplus_runtime_history": self._coordinator.store.surplus_runtime_history,
         }

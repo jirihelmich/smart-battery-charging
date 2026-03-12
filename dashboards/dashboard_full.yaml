@@ -1002,7 +1002,7 @@ views:
               <table width="100%" cellspacing="0" cellpadding="8">
               <tr><th align="left">Load</th><th>Power</th><th>Mode</th><th>Status</th><th>Today</th></tr>
               {%- for d in details %}
-              <tr><td align="left">{{ d.name }}</td><td>{{ d.power_kw }} kW</td><td>{{ d.mode | title }}</td><td>{% if d.is_device_on and d.controlled_by_automation %}🟢 Auto{% elif d.is_device_on %}🟡 Manual{% else %}⚪ OFF{% endif %}</td><td>{{ d.runtime_today_h }}h</td></tr>
+              <tr><td align="left">{{ d.name }}</td><td>{% if d.actual_power_kw is not none %}{{ d.actual_power_kw }}{% else %}{{ d.power_kw }}{% endif %} kW</td><td>{{ d.mode | title }}</td><td>{% if d.is_device_on and d.controlled_by_automation %}🟢 Auto{% elif d.is_device_on %}🟡 Manual{% else %}⚪ OFF{% endif %}</td><td>{{ d.energy_today_kwh }} kWh</td></tr>
               {%- endfor %}
               </table>
               {% endif %}
@@ -1062,6 +1062,24 @@ views:
       # ── Col 2: Real-time Charts ───────────────────────────────────────
       - type: grid
         cards:
+          - type: markdown
+            title: Live Power Draw
+            content: >-
+              {% set details =
+              state_attr('sensor.smart_energy_manager_surplus_load_status',
+              'load_details') or [] %}
+              {% if details | length == 0 %}
+              *No loads configured.*
+              {% else %}
+              <table width="100%" cellspacing="0" cellpadding="8">
+              <tr><th align="left">Load</th><th>Draw</th><th>Max</th><th>Energy Today</th></tr>
+              {%- for d in details %}
+              <tr><td align="left">{{ d.name }}</td><td>{% if d.actual_power_kw is not none %}<b>{{ d.actual_power_kw }} kW</b>{% elif d.is_device_on %}~{{ d.power_kw }} kW{% else %}—{% endif %}</td><td>{{ d.power_kw }} kW</td><td>{{ d.energy_today_kwh }} kWh</td></tr>
+              {%- endfor %}
+              </table>
+              {% endif %}
+            grid_options:
+              columns: 12
           - type: custom:apexcharts-card
             header:
               show: true
@@ -1150,27 +1168,26 @@ views:
               {% if history | length == 0 %}
               *No runtime data yet.*
               {% else %}
-              | Date | Loads |
-              |------|-------|
-              {% for entry in history %}
-              | {{ entry.date }} | {% for name, hours in entry.loads.items()
-              %}{{ name }}: {{ hours }}h{% if not loop.last %}, {% endif %}{%
-              endfor %} |
-              {% endfor %}
+              <table width="100%" cellspacing="0" cellpadding="6">
+              <tr><th align="left">Date</th><th>Loads</th><th>Energy</th><th>Surplus</th></tr>
+              {%- for entry in history %}
+              <tr><td align="left">{{ entry.date[5:] }}</td><td>{% for name, hours in entry.loads.items() %}{{ name }}: {{ hours }}h{% if not loop.last %}, {% endif %}{% endfor %}</td><td>{% if entry.energy_kwh is defined %}{% for name, kwh in entry.energy_kwh.items() %}{{ name }}: {{ kwh }}{% if not loop.last %}, {% endif %}{% endfor %} kWh{% else %}—{% endif %}</td><td>{{ entry.surplus_hours | default(0) }}h</td></tr>
+              {%- endfor %}
+              </table>
               {% endif %}
             grid_options:
               columns: 12
           - type: custom:apexcharts-card
             header:
               show: true
-              title: Daily Runtime
+              title: Daily Energy Consumed
             graph_span: 7d
             span:
               end: day
             chart_type: line
             series:
               - entity: sensor.smart_energy_manager_surplus_load_status
-                name: Runtime
+                name: Energy
                 type: column
                 color: "#ff9800"
                 float_precision: 1
@@ -1179,12 +1196,50 @@ views:
                   entity.attributes.runtime_history || [];
 
                   return history.map(entry => {
-                    const totalHours = Object.values(entry.loads || {}).reduce((a, b) => a + b, 0);
-                    return [new Date(entry.date).getTime(), totalHours];
+                    const energy = entry.energy_kwh || {};
+                    const total = Object.values(energy).reduce((a, b) => a + b, 0);
+                    return [new Date(entry.date).getTime(), total || 0];
+                  }).reverse();
+              - entity: sensor.smart_energy_manager_surplus_load_status
+                name: Runtime (h)
+                type: line
+                color: "#2196f3"
+                float_precision: 1
+                data_generator: >
+                  const history =
+                  entity.attributes.runtime_history || [];
+
+                  return history.map(entry => {
+                    const total = Object.values(entry.loads || {}).reduce((a, b) => a + b, 0);
+                    return [new Date(entry.date).getTime(), total];
                   }).reverse();
             apex_config:
               chart:
-                height: 180px
+                height: 200px
+              yaxis:
+                - title:
+                    text: kWh / hours
+            grid_options:
+              columns: 12
+          - type: markdown
+            title: Utilization Efficiency
+            content: >-
+              {% set factors =
+              state_attr('sensor.smart_energy_manager_surplus_load_status',
+              'utilization_factors') or {} %}
+              {% if factors | length == 0 %}
+              *No historical data yet.* Utilization will appear after the first
+              full day with surplus.
+              {% else %}
+              <table width="100%" cellspacing="0" cellpadding="8">
+              <tr><th align="left">Load</th><th>Utilization</th></tr>
+              {%- for name, factor in factors.items() %}
+              <tr><td align="left">{{ name }}</td><td>{{ (factor * 100) | round(0) }}%</td></tr>
+              {%- endfor %}
+              </table>
+
+              *Based on avg runtime / surplus hours over last 7 days.*
+              {% endif %}
             grid_options:
               columns: 12
           - type: custom:apexcharts-card
