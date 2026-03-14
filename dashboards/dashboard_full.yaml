@@ -1094,22 +1094,36 @@ views:
               {% set runtimes = state_attr('sensor.smart_energy_manager_surplus_forecast', 'predicted_runtimes') or {} %}
               {% set day = state_attr('sensor.smart_energy_manager_surplus_forecast', 'forecast_day') or 'today' %}
               {% set solar = states('sensor.smart_energy_manager_' ~ day ~ '_solar_forecast') | float(0) %}
-              {% set consumption = states('sensor.smart_energy_manager_average_daily_consumption') | float(0) %}
-              {% set bar_max = [solar, consumption, 1] | max %}
+              {% set baseline = state_attr('sensor.smart_energy_manager_surplus_forecast', 'baseline_consumption') | float(0) %}
+              {% set consumption = baseline if baseline > 0 else states('sensor.smart_energy_manager_average_daily_consumption') | float(0) %}
+              {% set battery_charge = [solar - consumption - surplus, 0] | max %}
+              {% set total = [solar, 0.1] | max %}
+              {% set pct_cons = ([consumption, solar] | min / total * 100) | round | int %}
+              {% set pct_bat = (battery_charge / total * 100) | round | int %}
+              {% set pct_sur = (surplus / total * 100) | round | int %}
 
-              <table width="100%" cellspacing="0" cellpadding="4">
-              <tr><td align="left">☀️ Solar ({{ "tmrw" if day == "tomorrow" else "today" }})</td><td align="right"><b>{{ solar | round(1) }} kWh</b></td></tr>
-              <tr><td colspan="2"><div style="background: #333; border-radius: 4px; overflow: hidden; height: 12px;"><div style="background: linear-gradient(90deg, #fdd835, #fb8c00); width: {{ (solar / bar_max * 100) | round }}%; height: 100%; border-radius: 4px;"></div></div></td></tr>
-              <tr><td align="left">🏠 Consumption (avg)</td><td align="right"><b>{{ consumption | round(1) }} kWh</b></td></tr>
-              <tr><td colspan="2"><div style="background: #333; border-radius: 4px; overflow: hidden; height: 12px;"><div style="background: linear-gradient(90deg, #42a5f5, #1565c0); width: {{ (consumption / bar_max * 100) | round }}%; height: 100%; border-radius: 4px;"></div></div></td></tr>
-              {% if surplus > 0 %}
-              <tr><td align="left">⚡ Surplus</td><td align="right"><b>{{ surplus | round(1) }} kWh</b> over {{ hours }}h{% if full_hour is not none %} (full at {{ full_hour }}:00){% endif %}</td></tr>
-              <tr><td colspan="2"><div style="background: #333; border-radius: 4px; overflow: hidden; height: 12px;"><div style="background: linear-gradient(90deg, #66bb6a, #2e7d32); width: {{ (surplus / bar_max * 100) | round }}%; height: 100%; border-radius: 4px;"></div></div></td></tr>
-              {% else %}
-              <tr><td align="left">⚡ Surplus</td><td align="right"><b>0 kWh</b> — no surplus expected</td></tr>
-              <tr><td colspan="2"><div style="background: #333; border-radius: 4px; overflow: hidden; height: 12px;"></div></td></tr>
-              {% endif %}
+              **{{ "Tomorrow" if day == "tomorrow" else "Today" }}**: ☀️ {{ solar | round(1) }} kWh solar
+
+              <table width="100%" cellspacing="0" cellpadding="6">
+              <tr>
+              <td width="{{ pct_cons }}%" align="center" bgcolor="#1565c0"><font color="white"><b>{{ [consumption, solar] | min | round(1) }}</b></font></td>
+              {% if battery_charge > 0.1 %}<td width="{{ pct_bat }}%" align="center" bgcolor="#f9a825"><font color="#333"><b>{{ battery_charge | round(1) }}</b></font></td>{% endif %}
+              {% if surplus > 0.1 %}<td width="{{ pct_sur }}%" align="center" bgcolor="#2e7d32"><font color="white"><b>{{ surplus | round(1) }}</b></font></td>{% endif %}
+              </tr>
+              <tr>
+              <td align="center"><small>🏠 Consumption</small></td>
+              {% if battery_charge > 0.1 %}<td align="center"><small>🔋 Battery</small></td>{% endif %}
+              {% if surplus > 0.1 %}<td align="center"><small>⚡ Surplus</small></td>{% endif %}
+              </tr>
               </table>
+
+              {% if surplus > 0 %}
+              ⚡ **{{ surplus | round(1) }} kWh** surplus over **{{ hours }}** hours{% if full_hour is not none %} (battery full at {{ full_hour }}:00){% endif %}
+              {% elif solar < consumption %}
+              *Deficit: solar {{ solar | round(1) }} kWh < consumption {{ consumption | round(1) }} kWh*
+              {% else %}
+              *No surplus expected. Solar covers consumption but battery won't overflow.*
+              {% endif %}
 
               {% if surplus > 0 and runtimes | length > 0 %}
 

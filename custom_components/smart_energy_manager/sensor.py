@@ -308,6 +308,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartBatterySensorDescription, ...] = (
             "battery_full_hour": d.get("surplus_forecast_battery_full_hour"),
             "hourly_kwh": d.get("surplus_forecast_hourly", {}),
             "predicted_runtimes": d.get("surplus_predicted_runtimes", {}),
+            "baseline_consumption": d.get("baseline_consumption", 0.0),
         },
     ),
     SmartBatterySensorDescription(

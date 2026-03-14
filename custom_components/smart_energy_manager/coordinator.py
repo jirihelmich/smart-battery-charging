@@ -832,6 +832,10 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # --- Analytics sensors ---
         self._compute_analytics(data, now)
 
+        # Baseline consumption (avg minus surplus load energy)
+        baseline_consumption = max(0.0, avg_consumption - self.planner._avg_surplus_energy()) if self.planner else avg_consumption
+        data["baseline_consumption"] = round(baseline_consumption, 2)
+
         # Surplus forecast — show tomorrow's after sunset
         if self.planner is not None:
             try:
