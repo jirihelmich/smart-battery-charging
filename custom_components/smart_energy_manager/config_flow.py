@@ -47,6 +47,7 @@ from .const import (
     CONF_MODE_SELF_USE,
     CONF_NIGHT_CONSUMPTION_MULTIPLIER,
     CONF_NOTIFICATION_SERVICE,
+    CONF_OUTDOOR_TEMP_SENSOR,
     CONF_NOTIFY_BATTERY_FULL,
     CONF_NOTIFY_BATTERY_LOW,
     CONF_NOTIFY_CHARGING_COMPLETE,
@@ -92,6 +93,7 @@ from .const import (
     DEFAULT_SURPLUS_MARGIN_OFF,
     DEFAULT_SURPLUS_MARGIN_ON,
     DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL,
+    DEFAULT_MAX_OUTDOOR_TEMP,
     DEFAULT_PREDICTIVE_LEAD_MINUTES,
     DEFAULT_PREDICTIVE_SCHEDULE_END,
     DEFAULT_PREDICTIVE_SCHEDULE_START,
@@ -566,6 +568,14 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                         CONF_DAILY_SOLAR_SENSOR,
                         default=current.get(CONF_DAILY_SOLAR_SENSOR, ""),
                     ): _entity_selector("sensor"),
+                    vol.Optional(
+                        CONF_GRID_EXPORT_POWER_SENSOR,
+                        default=current.get(CONF_GRID_EXPORT_POWER_SENSOR, ""),
+                    ): _entity_selector("sensor"),
+                    vol.Optional(
+                        CONF_OUTDOOR_TEMP_SENSOR,
+                        default=current.get(CONF_OUTDOOR_TEMP_SENSOR, ""),
+                    ): _entity_selector("sensor"),
                     # Advanced: Efficiency & Consumption Profiles
                     vol.Optional(
                         CONF_CHARGING_EFFICIENCY,
@@ -624,11 +634,6 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                         CONF_NOTIFY_SURPLUS_LOAD,
                         default=current.get(CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD),
                     ): bool,
-                    # Surplus load controller — grid export power sensor
-                    vol.Optional(
-                        CONF_GRID_EXPORT_POWER_SENSOR,
-                        default=current.get(CONF_GRID_EXPORT_POWER_SENSOR, ""),
-                    ): _entity_selector("sensor"),
                 }
             ),
             errors=errors,
@@ -688,6 +693,7 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                 "margin_on_kw": user_input.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON),
                 "margin_off_kw": user_input.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF),
                 "min_switch_interval": user_input.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL),
+                "max_outdoor_temp": user_input.get("max_outdoor_temp", DEFAULT_MAX_OUTDOOR_TEMP),
             }
             # If predictive mode, show schedule step
             if self._pending_load["mode"] == SURPLUS_MODE_PREDICTIVE:
@@ -729,6 +735,9 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     vol.Optional(
                         "min_switch_interval", default=DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL
                     ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
+                    vol.Optional(
+                        "max_outdoor_temp", default=DEFAULT_MAX_OUTDOOR_TEMP
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
                 }
             ),
         )
@@ -844,6 +853,7 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                 "margin_on_kw": user_input.get("margin_on_kw", ld.get("margin_on_kw", DEFAULT_SURPLUS_MARGIN_ON)),
                 "margin_off_kw": user_input.get("margin_off_kw", ld.get("margin_off_kw", DEFAULT_SURPLUS_MARGIN_OFF)),
                 "min_switch_interval": user_input.get("min_switch_interval", ld.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL)),
+                "max_outdoor_temp": user_input.get("max_outdoor_temp", ld.get("max_outdoor_temp", DEFAULT_MAX_OUTDOOR_TEMP)),
             }
             # Preserve predictive fields
             if updated["mode"] == SURPLUS_MODE_PREDICTIVE:
@@ -893,6 +903,9 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                     vol.Optional(
                         "min_switch_interval", default=ld.get("min_switch_interval", DEFAULT_SURPLUS_MIN_SWITCH_INTERVAL)
                     ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
+                    vol.Optional(
+                        "max_outdoor_temp", default=ld.get("max_outdoor_temp", DEFAULT_MAX_OUTDOOR_TEMP)
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
                 }
             ),
         )

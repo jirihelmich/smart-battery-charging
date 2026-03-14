@@ -208,16 +208,16 @@ class TestSurplusTick:
         hass.services.async_call.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_no_turn_on_when_surplus_insufficient(self):
-        """Don't turn on when surplus doesn't cover power + margin."""
-        hass = _make_hass(grid_export_kw=2.0, switch_states={"switch.water_heater": "off"})
+    async def test_no_turn_on_when_surplus_below_margin(self):
+        """Don't turn on when surplus doesn't cover the ON margin."""
+        hass = _make_hass(grid_export_kw=0.2, switch_states={"switch.water_heater": "off"})
         coord = _make_coordinator(soc=99.0, surplus_loads=[WATER_HEATER_LOAD])
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
 
         await ctrl.async_on_tick()
 
-        # 2.0 < 2.3 + 0.3 = 2.6 -> no turn on
+        # 0.2 < 0.3 (margin_on) -> no turn on
         hass.services.async_call.assert_not_called()
 
     @pytest.mark.asyncio
@@ -282,9 +282,9 @@ class TestSurplusTick:
 
     @pytest.mark.asyncio
     async def test_priority_ordering(self):
-        """Higher priority load gets surplus first."""
-        # 3.0 kW surplus, water heater needs 2.3+0.3=2.6, floor heating needs 1.5+0.3=1.8
-        # After water heater: remaining = 3.0 - 2.3 = 0.7 (not enough for floor heating)
+        """Higher priority load gets surplus first; second load turns on if margin met."""
+        # 3.0 kW surplus, water heater margin 0.3 -> on, remaining = 3.0 - 2.3 = 0.7
+        # Floor heating margin 0.3 -> 0.7 >= 0.3 -> also on (battery absorbs deficit)
         hass = _make_hass(
             grid_export_kw=3.0,
             switch_states={"switch.water_heater": "off", "switch.floor_heating": "off"},
@@ -295,10 +295,11 @@ class TestSurplusTick:
 
         await ctrl.async_on_tick()
 
-        # Only water heater should turn on
+        # Both turn on — water heater first (priority), floor heating has enough margin
         calls = hass.services.async_call.call_args_list
-        assert len(calls) == 1
+        assert len(calls) == 2
         assert calls[0][0] == ("switch", "turn_on", {"entity_id": "switch.water_heater"})
+        assert calls[1][0] == ("switch", "turn_on", {"entity_id": "switch.floor_heating"})
 
     @pytest.mark.asyncio
     async def test_both_loads_when_enough_surplus(self):
@@ -414,7 +415,7 @@ class TestMidnight:
         await ctrl.async_on_midnight()
 
         coord.async_record_surplus_runtime.assert_called_once_with(
-            {"Water Heater": 2.0}, surplus_hours=7, energy_data={}  # 7200s = 2h
+            {"Water Heater": 2.0}, surplus_hours=0, energy_data={}  # 7200s = 2h, surplus_hours=0 (no ticks ran)
         )
         # Runtime reset
         assert ctrl._states["switch.water_heater"].daily_runtime_seconds == 0.0

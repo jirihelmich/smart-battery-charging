@@ -66,7 +66,21 @@ class SmartBatteryStore:
             self._data = {**_default_data(), **stored}
         else:
             self._data = _default_data()
+        self._migrate_surplus_hours()
         _LOGGER.debug("Loaded storage data: %s entries", len(self._data))
+
+    def _migrate_surplus_hours(self) -> None:
+        """One-time fix: estimate surplus_hours for entries recorded with the bug."""
+        history = self._data.get("surplus_runtime_history", [])
+        migrated = False
+        for entry in history:
+            if entry.get("surplus_hours", 0) == 0 and entry.get("loads"):
+                max_runtime = max(entry["loads"].values(), default=0)
+                if max_runtime > 0:
+                    entry["surplus_hours"] = round(max_runtime + 2)
+                    migrated = True
+        if migrated:
+            _LOGGER.info("Migrated surplus_hours for historical entries")
 
     async def async_save(self) -> None:
         """Save data to storage."""

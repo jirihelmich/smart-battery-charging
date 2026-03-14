@@ -586,18 +586,36 @@ class ChargingPlanner:
                 min_soc_reached = soc_kwh
 
         min_soc_pct = round(min_soc_reached / capacity * 100, 1)
+        peak_soc_pct = round(soc_kwh / capacity * 100, 1)
         surplus_budget = max(0.0, total_surplus - reactive_claim_total)
 
+        # Check 1: SOC must not drop below min_soc
         approved = min_soc_reached >= min_soc_kwh
-        if approved:
-            reason = (
-                f"Approved: surplus {surplus_budget:.1f} kWh, "
-                f"min SOC {min_soc_pct:.0f}% stays above {c.min_soc:.0f}%"
-            )
-        else:
+        reason = ""
+
+        if not approved:
             reason = (
                 f"Denied: min SOC would drop to {min_soc_pct:.0f}% "
                 f"(below {c.min_soc:.0f}%)"
+            )
+
+        # Check 2: Battery must recover enough for reactive loads to trigger
+        if approved and reactive_loads:
+            min_reactive_threshold = min(
+                rl.battery_on_threshold for rl in reactive_loads
+            )
+            if peak_soc_pct < min_reactive_threshold:
+                approved = False
+                reason = (
+                    f"Denied: battery peaks at {peak_soc_pct:.0f}% but "
+                    f"reactive loads need {min_reactive_threshold:.0f}% SOC"
+                )
+
+        if approved:
+            reason = (
+                f"Approved: surplus {surplus_budget:.1f} kWh, "
+                f"min SOC {min_soc_pct:.0f}% stays above {c.min_soc:.0f}%, "
+                f"peak SOC {peak_soc_pct:.0f}%"
             )
 
         return PredictiveEvaluation(

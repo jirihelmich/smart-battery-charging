@@ -157,6 +157,7 @@ class SurplusLoadConfig:
     schedule_start_hour: int = 5  # Hour to start the load (predictive only)
     schedule_end_hour: int = 8  # Hour to stop the load (predictive only)
     evaluation_lead_minutes: int = 30  # Minutes before schedule to evaluate
+    max_outdoor_temp: float = 0.0  # Skip load when outdoor temp exceeds this (0 = disabled)
 
 
 @dataclass
@@ -172,6 +173,7 @@ class SurplusLoadState:
     # Predictive mode state
     predictive_approved: bool | None = None  # None=not evaluated, True/False
     predictive_aborted: bool = False  # True if mid-run abort happened today
+    predictive_notified: bool = False  # True after ON notification sent for this schedule
 
 
 @dataclass(frozen=True)

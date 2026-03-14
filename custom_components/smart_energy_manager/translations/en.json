@@ -121,6 +121,8 @@
           "grid_import_sensor": "Daily grid import sensor",
           "grid_export_sensor": "Daily grid export sensor",
           "daily_solar_sensor": "Daily solar production sensor",
+          "grid_export_power_sensor": "Grid export power sensor (instantaneous kW/W)",
+          "outdoor_temp_sensor": "Outdoor temperature sensor (for seasonal load control)",
           "charging_efficiency": "Charging efficiency (0.7-1.0)",
           "evening_consumption_multiplier": "Evening consumption multiplier",
           "night_consumption_multiplier": "Night consumption multiplier",
@@ -134,8 +136,7 @@
           "notify_sensor_unavailable": "Notify: Sensor unavailable",
           "notify_battery_full": "Notify: Battery full",
           "notify_battery_low": "Notify: Battery low",
-          "notify_surplus_load": "Notify: Surplus load switched",
-          "grid_export_power_sensor": "Grid export power sensor (instantaneous kW/W)"
+          "notify_surplus_load": "Notify: Surplus load switched"
         }
       },
       "surplus_menu": {
@@ -161,7 +162,8 @@
           "battery_off_threshold": "Battery SOC to disable (%)",
           "margin_on_kw": "Extra surplus to turn ON (kW)",
           "margin_off_kw": "Deficit margin to turn OFF (kW)",
-          "min_switch_interval": "Min switch interval (seconds)"
+          "min_switch_interval": "Min switch interval (seconds)",
+          "max_outdoor_temp": "Max outdoor temp (°C, 0 = disabled)"
         }
       },
       "surplus_add_predictive": {
@@ -194,7 +196,8 @@
           "battery_off_threshold": "Battery SOC to disable (%)",
           "margin_on_kw": "Extra surplus to turn ON (kW)",
           "margin_off_kw": "Deficit margin to turn OFF (kW)",
-          "min_switch_interval": "Min switch interval (seconds)"
+          "min_switch_interval": "Min switch interval (seconds)",
+          "max_outdoor_temp": "Max outdoor temp (°C, 0 = disabled)"
         }
       },
       "surplus_edit_predictive": {

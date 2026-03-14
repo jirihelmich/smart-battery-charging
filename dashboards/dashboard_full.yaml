@@ -1062,22 +1062,50 @@ views:
       # ── Col 2: Real-time Charts ───────────────────────────────────────
       - type: grid
         cards:
-          - type: markdown
-            title: Live Power Draw
-            content: >-
-              {% set details =
-              state_attr('sensor.smart_energy_manager_surplus_load_status',
-              'load_details') or [] %}
-              {% if details | length == 0 %}
-              *No loads configured.*
-              {% else %}
-              <table width="100%" cellspacing="0" cellpadding="8">
-              <tr><th align="left">Load</th><th>Draw</th><th>Max</th><th>Energy Today</th></tr>
-              {%- for d in details %}
-              <tr><td align="left">{{ d.name }}</td><td>{% if d.actual_power_kw is not none %}<b>{{ d.actual_power_kw }} kW</b>{% elif d.is_device_on %}~{{ d.power_kw }} kW{% else %}—{% endif %}</td><td>{{ d.power_kw }} kW</td><td>{{ d.energy_today_kwh }} kWh</td></tr>
-              {%- endfor %}
-              </table>
-              {% endif %}
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Live Power Draw
+              show_states: true
+            graph_span: 24h
+            span:
+              start: day
+            now:
+              show: true
+              label: Now
+            apex_config:
+              chart:
+                height: 200px
+                stacked: true
+              yaxis:
+                - title:
+                    text: kW
+                  decimalsInFloat: 1
+                  min: 0
+            all_series_config:
+              type: area
+              stroke_width: 1
+              opacity: 0.4
+              group_by:
+                func: avg
+                duration: 5min
+              transform: "return x / 1000;"
+            series:
+              - entity: sensor.water_heater_power
+                name: Water Heater
+                color: "#ff6b6b"
+                unit: " kW"
+                float_precision: 2
+              - entity: sensor.power_meter_floor_heating_upstairs_power_2
+                name: Floor Upstairs
+                color: "#4ecdc4"
+                unit: " kW"
+                float_precision: 2
+              - entity: sensor.shelly3em63g3_b08184e0d6c0_energy_meter_2_power
+                name: Floor Downstairs
+                color: "#ffd93d"
+                unit: " kW"
+                float_precision: 2
             grid_options:
               columns: 12
           - type: custom:apexcharts-card
@@ -1184,7 +1212,6 @@ views:
             graph_span: 7d
             span:
               end: day
-            chart_type: line
             series:
               - entity: sensor.smart_energy_manager_surplus_load_status
                 name: Energy
@@ -1202,7 +1229,7 @@ views:
                   }).reverse();
               - entity: sensor.smart_energy_manager_surplus_load_status
                 name: Runtime (h)
-                type: line
+                type: column
                 color: "#2196f3"
                 float_precision: 1
                 data_generator: >
@@ -1227,18 +1254,28 @@ views:
               {% set factors =
               state_attr('sensor.smart_energy_manager_surplus_load_status',
               'utilization_factors') or {} %}
+              {% set history =
+              state_attr('sensor.smart_energy_manager_surplus_load_status',
+              'runtime_history') or [] %}
+              {% set valid = history | selectattr('surplus_hours', 'gt', 0) | list %}
               {% if factors | length == 0 %}
               *No historical data yet.* Utilization will appear after the first
               full day with surplus.
               {% else %}
               <table width="100%" cellspacing="0" cellpadding="8">
-              <tr><th align="left">Load</th><th>Utilization</th></tr>
+              <tr><th align="left">Load</th><th>Avg Runtime</th><th>Avg Energy</th><th>Utilization</th></tr>
               {%- for name, factor in factors.items() %}
-              <tr><td align="left">{{ name }}</td><td>{{ (factor * 100) | round(0) }}%</td></tr>
+              {%- set ns = namespace(hours=0, kwh=0) %}
+              {%- for entry in valid %}
+              {%- set ns.hours = ns.hours + (entry.loads or {}).get(name, 0) %}
+              {%- set ns.kwh = ns.kwh + (entry.energy_kwh or {}).get(name, 0) %}
+              {%- endfor %}
+              {%- set days = valid | length %}
+              <tr><td align="left">{{ name }}</td><td>{{ (ns.hours / days) | round(1) }}h</td><td>{{ (ns.kwh / days) | round(1) }} kWh</td><td>{{ (factor * 100) | round(0) }}%</td></tr>
               {%- endfor %}
               </table>
 
-              *Based on avg runtime / surplus hours over last 7 days.*
+              *Avg per day over last {{ valid | length }} day(s) with surplus.*
               {% endif %}
             grid_options:
               columns: 12

@@ -18,7 +18,9 @@ from homeassistant.core import HomeAssistant
 from .const import (
     CONF_GRID_EXPORT_POWER_SENSOR,
     CONF_NOTIFY_SURPLUS_LOAD,
+    CONF_OUTDOOR_TEMP_SENSOR,
     CONF_SURPLUS_LOADS,
+    DEFAULT_MAX_OUTDOOR_TEMP,
     DEFAULT_PREDICTIVE_LEAD_MINUTES,
     DEFAULT_PREDICTIVE_SCHEDULE_END,
     DEFAULT_PREDICTIVE_SCHEDULE_START,
@@ -65,6 +67,7 @@ def _load_configs_from_options(coordinator: SmartBatteryCoordinator) -> list[Sur
                 schedule_start_hour=int(item.get("schedule_start_hour", DEFAULT_PREDICTIVE_SCHEDULE_START)),
                 schedule_end_hour=int(item.get("schedule_end_hour", DEFAULT_PREDICTIVE_SCHEDULE_END)),
                 evaluation_lead_minutes=int(item.get("evaluation_lead_minutes", DEFAULT_PREDICTIVE_LEAD_MINUTES)),
+                max_outdoor_temp=float(item.get("max_outdoor_temp", DEFAULT_MAX_OUTDOOR_TEMP)),
             ))
         except (KeyError, ValueError, TypeError):
             _LOGGER.warning("Invalid surplus load config: %s", item)
@@ -86,6 +89,8 @@ class SurplusLoadController:
         self._notifier = notifier
         self._states: dict[str, SurplusLoadState] = {}
         self._configs: list[SurplusLoadConfig] = []
+        self._daily_surplus_seconds: float = 0.0  # Actual seconds with grid export > 0 today
+        self._last_surplus_tick_time: float = 0.0
 
     def load_configs(self) -> None:
         """Reload configs from options and sync states."""
@@ -105,6 +110,8 @@ class SurplusLoadController:
             if entity_id in self._states:
                 self._states[entity_id].last_switch_time = data.get("last_switch_time", 0.0)
                 self._states[entity_id].daily_runtime_seconds = data.get("daily_runtime_seconds", 0.0)
+                self._states[entity_id].controlled_by_automation = data.get("controlled_by_automation", False)
+                self._states[entity_id].daily_energy_kwh = data.get("daily_energy_kwh", 0.0)
 
     def _sync_actual_switch_states(self) -> None:
         """Sync is_running with actual HA switch states.
@@ -121,6 +128,28 @@ class SurplusLoadController:
                     # State changed externally — not controlled by automation
                     st.controlled_by_automation = False
                 st.is_running = actual_on
+
+    def _get_outdoor_temp(self) -> float | None:
+        """Read outdoor temperature from configured sensor."""
+        sensor = self._coordinator._opt(CONF_OUTDOOR_TEMP_SENSOR, "")
+        if not sensor:
+            return None
+        state = self._hass.states.get(sensor)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        try:
+            return float(state.state)
+        except (ValueError, TypeError):
+            return None
+
+    def _is_temp_blocked(self, cfg: SurplusLoadConfig) -> bool:
+        """Check if load should be skipped due to outdoor temperature."""
+        if cfg.max_outdoor_temp <= 0:
+            return False
+        temp = self._get_outdoor_temp()
+        if temp is None:
+            return False  # Sensor unavailable — don't block
+        return temp > cfg.max_outdoor_temp
 
     def _is_device_on(self, entity_id: str) -> bool:
         """Read actual switch state from HA."""
@@ -225,19 +254,24 @@ class SurplusLoadController:
             if st.predictive_approved is not None or st.predictive_aborted:
                 continue
 
-            # Check if we're within the evaluation window
-            eval_hour = cfg.schedule_start_hour
-            eval_minute = 60 - cfg.evaluation_lead_minutes
-            if eval_minute < 0:
-                eval_hour -= 1
-                eval_minute += 60
+            # Skip if outdoor temp exceeds threshold
+            if self._is_temp_blocked(cfg):
+                st.predictive_approved = False
+                _LOGGER.info("Predictive '%s': skipped — outdoor temp too high", cfg.name)
+                continue
 
-            # Are we at or past evaluation time but before schedule start?
+            # Check if we're within the evaluation window or in-schedule (late eval)
             current_minutes = now.hour * 60 + now.minute
-            eval_minutes = eval_hour * 60 + eval_minute
             start_minutes = cfg.schedule_start_hour * 60
+            end_minutes = cfg.schedule_end_hour * 60
+            eval_minutes = start_minutes - cfg.evaluation_lead_minutes
 
-            if not (eval_minutes <= current_minutes < start_minutes):
+            # Evaluate if: (a) in pre-schedule lead window, or
+            # (b) already in schedule but not yet evaluated (e.g. after HA restart)
+            in_eval_window = eval_minutes <= current_minutes < start_minutes
+            in_schedule_unevaluated = start_minutes <= current_minutes < end_minutes
+
+            if not (in_eval_window or in_schedule_unevaluated):
                 continue
 
             _LOGGER.info(
@@ -301,12 +335,13 @@ class SurplusLoadController:
                             "Predictive: %s turn on (schedule %02d:00-%02d:00, SOC=%.0f%%)",
                             cfg.name, cfg.schedule_start_hour, cfg.schedule_end_hour, soc,
                         )
-                        if self._notifier and self._coordinator._opt(
+                        if not st.predictive_notified and self._notifier and self._coordinator._opt(
                             CONF_NOTIFY_SURPLUS_LOAD, DEFAULT_NOTIFY_SURPLUS_LOAD
                         ):
                             await self._notifier.async_notify_surplus_load(
                                 cfg.name, True, 0.0, soc
                             )
+                            st.predictive_notified = True
                     except Exception:
                         _LOGGER.exception("Failed to turn on predictive load %s", cfg.name)
                 else:
@@ -378,6 +413,14 @@ class SurplusLoadController:
         monotonic_now = time.monotonic()
         now = self._get_now()
 
+        # Track actual surplus time (grid export > 0)
+        grid_export_now = self._get_grid_export_power()
+        if grid_export_now is not None and grid_export_now > 0 and self._last_surplus_tick_time > 0:
+            elapsed = monotonic_now - self._last_surplus_tick_time
+            if 0 < elapsed < 600:
+                self._daily_surplus_seconds += elapsed
+        self._last_surplus_tick_time = monotonic_now
+
         # Sync with actual HA switch states (detects manual changes)
         self._sync_actual_switch_states()
 
@@ -426,10 +469,13 @@ class SurplusLoadController:
         for cfg in reactive_configs:  # sorted by priority (low first)
             st = self._states[cfg.switch_entity]
 
+            temp_blocked = self._is_temp_blocked(cfg)
+
             if st.is_running:
                 # Already running — should we turn OFF?
                 should_off = (
-                    soc < cfg.battery_off_threshold
+                    temp_blocked
+                    or soc < cfg.battery_off_threshold
                     or available_surplus < cfg.power_kw - cfg.margin_off_kw
                 )
                 if should_off:
@@ -439,9 +485,12 @@ class SurplusLoadController:
                     available_surplus -= cfg.power_kw
             else:
                 # Not running — should we turn ON?
+                # Turn on when SOC is above threshold and surplus covers the margin.
+                # The battery absorbs any short-term deficit between surplus and load power.
                 should_on = (
-                    soc >= cfg.battery_on_threshold
-                    and available_surplus >= cfg.power_kw + cfg.margin_on_kw
+                    not temp_blocked
+                    and soc >= cfg.battery_on_threshold
+                    and available_surplus >= cfg.margin_on_kw
                 )
                 if should_on:
                     desired[cfg.switch_entity] = True
@@ -455,6 +504,9 @@ class SurplusLoadController:
             want_on = desired.get(cfg.switch_entity, False)
 
             if want_on == st.is_running:
+                # Claim ownership if controller agrees device should be on
+                if want_on and not st.controlled_by_automation:
+                    st.controlled_by_automation = True
                 continue  # No change needed
 
             # Anti-flap: check minimum switch interval
@@ -535,15 +587,11 @@ class SurplusLoadController:
             # Reset predictive state for tomorrow
             st.predictive_approved = None
             st.predictive_aborted = False
+            st.predictive_notified = False
 
-        # Record surplus hours from today's forecast
-        surplus_hours = 0
-        if self._coordinator.planner:
-            try:
-                forecast = self._coordinator.planner.forecast_today_surplus()
-                surplus_hours = forecast.surplus_hours
-            except Exception:
-                _LOGGER.debug("Could not get today's surplus hours for history")
+        # Use actual tracked surplus hours (not forecast)
+        surplus_hours = round(self._daily_surplus_seconds / 3600)
+        self._daily_surplus_seconds = 0.0
 
         if runtime_data:
             await self._coordinator.async_record_surplus_runtime(
@@ -558,6 +606,8 @@ class SurplusLoadController:
             result[entity_id] = {
                 "last_switch_time": st.last_switch_time,
                 "daily_runtime_seconds": st.daily_runtime_seconds,
+                "controlled_by_automation": st.controlled_by_automation,
+                "daily_energy_kwh": st.daily_energy_kwh,
             }
         return result
 
@@ -573,7 +623,7 @@ class SurplusLoadController:
             device_on = self._is_device_on(cfg.switch_entity)
             if st.is_running:
                 active_loads.append(cfg.name)
-            real_power = self._read_power_sensor(cfg) if device_on else None
+            real_power = self._read_power_sensor(cfg)
             detail: dict[str, Any] = {
                 "name": cfg.name,
                 "entity": cfg.switch_entity,

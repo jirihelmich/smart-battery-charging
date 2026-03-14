@@ -103,7 +103,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Register event listeners
-    _register_event_listeners(hass, entry, coordinator, planner, state_machine, notifier)
+    _register_event_listeners(hass, entry, coordinator, planner, state_machine, notifier, surplus_controller, store)
 
     # Listen for options updates
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -153,6 +153,8 @@ def _register_event_listeners(
     planner: ChargingPlanner,
     state_machine: ChargingStateMachine,
     notifier: ChargingNotifier,
+    surplus_controller: "SurplusLoadController",
+    store: SmartBatteryStore,
 ) -> None:
     """Register all event listeners for charging automation."""
 
