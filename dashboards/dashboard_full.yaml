@@ -27,13 +27,33 @@ views:
                   index) => {
                     return [new Date(date).getTime() + (30 * 60 * 1000), value];
                   });
-          - type: gauge
+          - type: custom:gauge-card-pro
             entity: sensor.current_spot_electricity_price
-            name: Electricity Price
-            unit: Kč/kWh
             needle: true
+            gradient: true
             min: -1
             max: 8
+            titles:
+              primary: Electricity Price
+              primary_font_size: 14px
+            setpoint:
+              type: entity
+              value: number.smart_energy_manager_max_charge_price
+              color: '#1565c0'
+              label: true
+              precision: 1
+            min_indicator:
+              type: entity
+              value: sensor.spot_cheapest_electricity_today
+              color: '#43a047'
+              label: true
+              precision: 1
+            max_indicator:
+              type: entity
+              value: sensor.spot_most_expensive_electricity_today
+              color: '#e53935'
+              label: true
+              precision: 1
             segments:
               - from: -1
                 color: '#43a047'
@@ -45,6 +65,54 @@ views:
                 color: '#fb8c00'
               - from: 6
                 color: '#e53935'
+          - type: custom:gauge-card-pro
+            entity: sensor.solax_inverter_battery_capacity
+            entity2: sensor.smart_energy_manager_battery_usable_charge
+            needle: true
+            gradient: true
+            min: 0
+            max: 100
+            titles:
+              primary: Battery
+              primary_font_size: 14px
+            inner:
+              min: 0
+              max: 15
+              mode: severity
+              segments:
+                - from: 0
+                  color: '#e53935'
+                - from: 3
+                  color: '#fb8c00'
+                - from: 6
+                  color: '#fdd835'
+                - from: 9
+                  color: '#8bc34a'
+                - from: 12
+                  color: '#43a047'
+            setpoint:
+              type: entity
+              value: number.smart_energy_manager_max_charge_level
+              color: '#1565c0'
+              label: true
+              precision: 0
+            min_indicator:
+              type: entity
+              value: number.smart_energy_manager_min_soc
+              color: '#e53935'
+              label: true
+              precision: 0
+            segments:
+              - from: 0
+                color: '#e53935'
+              - from: 15
+                color: '#fb8c00'
+              - from: 30
+                color: '#fdd835'
+              - from: 50
+                color: '#8bc34a'
+              - from: 70
+                color: '#43a047'
       - type: grid
         cards:
           - type: vertical-stack
@@ -826,13 +894,15 @@ views:
       # ── Section 6: Gauges & Analytics ──────────────────────────────────
       - type: grid
         cards:
-          - type: gauge
+          - type: custom:gauge-card-pro
             entity: sensor.smart_energy_manager_self_consumption_ratio
-            name: Self Consumption
-            unit: '%'
             needle: true
+            gradient: true
             min: 0
             max: 100
+            titles:
+              primary: Self Consumption
+              primary_font_size: 14px
             segments:
               - from: 0
                 color: '#e53935'
@@ -846,13 +916,15 @@ views:
                 color: '#43a047'
             grid_options:
               columns: 6
-          - type: gauge
+          - type: custom:gauge-card-pro
             entity: sensor.smart_energy_manager_grid_dependency
-            name: Grid Dependency
-            unit: '%'
             needle: true
+            gradient: true
             min: 0
             max: 100
+            titles:
+              primary: Grid Dependency
+              primary_font_size: 14px
             segments:
               - from: 0
                 color: '#43a047'
@@ -1016,20 +1088,31 @@ views:
               {% set full_hour = state_attr('sensor.smart_energy_manager_surplus_forecast', 'battery_full_hour') %}
               {% set runtimes = state_attr('sensor.smart_energy_manager_surplus_forecast', 'predicted_runtimes') or {} %}
               {% set day = state_attr('sensor.smart_energy_manager_surplus_forecast', 'forecast_day') or 'today' %}
-              {% if surplus == 0 %}
-              *No surplus expected {{ day }}.*
-              {% else %}
-              **{{ "Tomorrow" if day == "tomorrow" else "Today" }}: {{ surplus }} kWh** surplus over **{{ hours }}** hours{% if full_hour is not none %} (battery full at {{ full_hour }}:00){% endif %}
+              {% set solar = states('sensor.smart_energy_manager_' ~ day ~ '_solar_forecast') | float(0) %}
+              {% set consumption = states('sensor.smart_energy_manager_average_daily_consumption') | float(0) %}
+              {% set bar_max = [solar, consumption, 1] | max %}
 
-              {% if runtimes | length > 0 %}
+              <table width="100%" cellspacing="0" cellpadding="4">
+              <tr><td align="left">☀️ Solar ({{ "tmrw" if day == "tomorrow" else "today" }})</td><td align="right"><b>{{ solar | round(1) }} kWh</b></td></tr>
+              <tr><td colspan="2"><div style="background: #333; border-radius: 4px; overflow: hidden; height: 12px;"><div style="background: linear-gradient(90deg, #fdd835, #fb8c00); width: {{ (solar / bar_max * 100) | round }}%; height: 100%; border-radius: 4px;"></div></div></td></tr>
+              <tr><td align="left">🏠 Consumption (avg)</td><td align="right"><b>{{ consumption | round(1) }} kWh</b></td></tr>
+              <tr><td colspan="2"><div style="background: #333; border-radius: 4px; overflow: hidden; height: 12px;"><div style="background: linear-gradient(90deg, #42a5f5, #1565c0); width: {{ (consumption / bar_max * 100) | round }}%; height: 100%; border-radius: 4px;"></div></div></td></tr>
+              {% if surplus > 0 %}
+              <tr><td align="left">⚡ Surplus</td><td align="right"><b>{{ surplus | round(1) }} kWh</b> over {{ hours }}h{% if full_hour is not none %} (full at {{ full_hour }}:00){% endif %}</td></tr>
+              <tr><td colspan="2"><div style="background: #333; border-radius: 4px; overflow: hidden; height: 12px;"><div style="background: linear-gradient(90deg, #66bb6a, #2e7d32); width: {{ (surplus / bar_max * 100) | round }}%; height: 100%; border-radius: 4px;"></div></div></td></tr>
+              {% else %}
+              <tr><td align="left">⚡ Surplus</td><td align="right"><b>0 kWh</b> — no surplus expected</td></tr>
+              <tr><td colspan="2"><div style="background: #333; border-radius: 4px; overflow: hidden; height: 12px;"></div></td></tr>
+              {% endif %}
+              </table>
+
+              {% if surplus > 0 and runtimes | length > 0 %}
+
+              **Predicted runtimes:**
               {%- for name, h in runtimes.items() %}
 
               - **{{ name }}**: ~{{ h }}h
-
               {%- endfor %}
-              {% else %}
-              No loads configured.
-              {% endif %}
               {% endif %}
             grid_options:
               columns: 12
