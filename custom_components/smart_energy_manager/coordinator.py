@@ -881,6 +881,16 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     }
                 else:
                     data["surplus_predicted_runtimes"] = {}
+
+                # Compute solar breakdown shares for donut chart
+                solar_key = "tomorrow_solar_forecast" if after_sunset else "today_solar_forecast"
+                solar_total = data.get(solar_key, 0.0)
+                surplus_kwh = surplus_forecast.total_kwh
+                cons_share = min(baseline_consumption, solar_total)
+                bat_share = max(solar_total - baseline_consumption - surplus_kwh, 0.0)
+                data["surplus_chart_consumption"] = round(cons_share, 1)
+                data["surplus_chart_battery"] = round(bat_share, 1)
+                data["surplus_chart_surplus"] = round(surplus_kwh, 1)
             except Exception:
                 _LOGGER.debug("Surplus forecast failed, using defaults")
                 data["surplus_forecast_kwh"] = 0.0

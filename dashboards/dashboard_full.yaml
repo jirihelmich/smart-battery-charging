@@ -1085,53 +1085,66 @@ views:
               {% endif %}
             grid_options:
               columns: 12
+          - type: custom:apexcharts-card
+            chart_type: donut
+            header:
+              title: Surplus Forecast
+              show: true
+              show_states: true
+              colorize_states: true
+            apex_config:
+              legend:
+                show: false
+              dataLabels:
+                enabled: true
+                dropShadow:
+                  enabled: false
+                formatter: |
+                  EVAL:function(val, opts) {
+                    var v = opts.w.config.series[opts.seriesIndex];
+                    return v > 0 ? v.toFixed(1) : '';
+                  }
+              plotOptions:
+                pie:
+                  donut:
+                    size: '60%'
+                    labels:
+                      show: true
+                      total:
+                        show: true
+                        label: Solar
+                        formatter: |
+                          EVAL:function(w) {
+                            return w.globals.seriesTotals.reduce((a, b) => a + b, 0).toFixed(1) + ' kWh';
+                          }
+              chart:
+                height: 220
+            series:
+              - entity: sensor.smart_energy_manager_surplus_forecast
+                attribute: chart_consumption
+                name: Consumption
+                color: '#1565c0'
+              - entity: sensor.smart_energy_manager_surplus_forecast
+                attribute: chart_battery
+                name: Battery
+                color: '#f9a825'
+              - entity: sensor.smart_energy_manager_surplus_forecast
+                attribute: chart_surplus
+                name: Surplus
+                color: '#2e7d32'
+            grid_options:
+              columns: 12
           - type: markdown
-            title: Surplus Forecast
             content: >-
               {% set surplus = states('sensor.smart_energy_manager_surplus_forecast') | float(0) %}
               {% set hours = state_attr('sensor.smart_energy_manager_surplus_forecast', 'surplus_hours') | int(0) %}
               {% set full_hour = state_attr('sensor.smart_energy_manager_surplus_forecast', 'battery_full_hour') %}
               {% set runtimes = state_attr('sensor.smart_energy_manager_surplus_forecast', 'predicted_runtimes') or {} %}
               {% set day = state_attr('sensor.smart_energy_manager_surplus_forecast', 'forecast_day') or 'today' %}
-              {% set solar = states('sensor.smart_energy_manager_' ~ day ~ '_solar_forecast') | float(0) %}
-              {% set baseline = state_attr('sensor.smart_energy_manager_surplus_forecast', 'baseline_consumption') | float(0) %}
-              {% set consumption = baseline if baseline > 0 else states('sensor.smart_energy_manager_average_daily_consumption') | float(0) %}
-              {% set battery_charge = [solar - consumption - surplus, 0] | max %}
-              {% set total = [solar, 0.1] | max %}
-              {% set pct_cons = ([consumption, solar] | min / total * 100) | round | int %}
-              {% set pct_bat = (battery_charge / total * 100) | round | int %}
-              {% set pct_sur = (surplus / total * 100) | round | int %}
-
-              **{{ "Tomorrow" if day == "tomorrow" else "Today" }}**: ☀️ {{ solar | round(1) }} kWh solar
-
-              <table width="100%" cellspacing="0" cellpadding="6">
-              <tr>
-              <td width="{{ pct_cons }}%" align="center" bgcolor="#1565c0"><font color="white"><b>{{ [consumption, solar] | min | round(1) }}</b></font></td>
-              {% if battery_charge > 0.1 %}<td width="{{ pct_bat }}%" align="center" bgcolor="#f9a825"><font color="#333"><b>{{ battery_charge | round(1) }}</b></font></td>{% endif %}
-              {% if surplus > 0.1 %}<td width="{{ pct_sur }}%" align="center" bgcolor="#2e7d32"><font color="white"><b>{{ surplus | round(1) }}</b></font></td>{% endif %}
-              </tr>
-              <tr>
-              <td align="center"><small>🏠 Consumption</small></td>
-              {% if battery_charge > 0.1 %}<td align="center"><small>🔋 Battery</small></td>{% endif %}
-              {% if surplus > 0.1 %}<td align="center"><small>⚡ Surplus</small></td>{% endif %}
-              </tr>
-              </table>
-
               {% if surplus > 0 %}
-              ⚡ **{{ surplus | round(1) }} kWh** surplus over **{{ hours }}** hours{% if full_hour is not none %} (battery full at {{ full_hour }}:00){% endif %}
-              {% elif solar < consumption %}
-              *Deficit: solar {{ solar | round(1) }} kWh < consumption {{ consumption | round(1) }} kWh*
+              ⚡ **{{ surplus | round(1) }} kWh** surplus over **{{ hours }}**h{% if full_hour is not none %} (battery full at {{ full_hour }}:00){% endif %}{% if runtimes | length > 0 %} · {% for name, h in runtimes.items() %}{% if h > 0 %}**{{ name }}** ~{{ h }}h{% if not loop.last %} · {% endif %}{% endif %}{% endfor %}{% endif %}
               {% else %}
-              *No surplus expected. Solar covers consumption but battery won't overflow.*
-              {% endif %}
-
-              {% if surplus > 0 and runtimes | length > 0 %}
-
-              **Predicted runtimes:**
-              {%- for name, h in runtimes.items() %}
-
-              - **{{ name }}**: ~{{ h }}h
-              {%- endfor %}
+              *No surplus expected {{ "tomorrow" if day == "tomorrow" else "today" }}*
               {% endif %}
             grid_options:
               columns: 12
@@ -1289,36 +1302,33 @@ views:
       # ── Col 3: Runtime History ────────────────────────────────────────
       - type: grid
         cards:
-          - type: markdown
-            title: Runtime History (last 7 days)
-            content: >-
-              {% set history =
-              state_attr('sensor.smart_energy_manager_surplus_load_status',
-              'runtime_history') or [] %}
-              {% if history | length == 0 %}
-              *No runtime data yet.*
-              {% else %}
-              <table width="100%" cellspacing="0" cellpadding="6">
-              <tr><th align="left">Date</th><th>Loads</th><th>Energy</th><th>Surplus</th></tr>
-              {%- for entry in history %}
-              <tr><td align="left">{{ entry.date[5:] }}</td><td>{% for name, hours in entry.loads.items() %}{{ name }}: {{ hours }}h{% if not loop.last %}, {% endif %}{% endfor %}</td><td>{% if entry.energy_kwh is defined %}{% for name, kwh in entry.energy_kwh.items() %}{{ name }}: {{ kwh }}{% if not loop.last %}, {% endif %}{% endfor %} kWh{% else %}—{% endif %}</td><td>{{ entry.surplus_hours | default(0) }}h</td></tr>
-              {%- endfor %}
-              </table>
-              {% endif %}
-            grid_options:
-              columns: 12
           - type: custom:apexcharts-card
             header:
               show: true
-              title: Daily Energy Consumed
+              title: Surplus Energy by Load
+              show_states: false
             graph_span: 7d
             span:
               end: day
+            apex_config:
+              chart:
+                height: 250
+                stacked: true
+              yaxis:
+                - title:
+                    text: kWh
+                  decimalsInFloat: 1
+              xaxis:
+                labels:
+                  format: dd MMM
+              legend:
+                show: true
+                position: bottom
             series:
               - entity: sensor.smart_energy_manager_surplus_load_status
-                name: Energy
+                name: Water Heater
                 type: column
-                color: "#ff9800"
+                color: "#e53935"
                 float_precision: 1
                 data_generator: >
                   const history =
@@ -1326,28 +1336,34 @@ views:
 
                   return history.map(entry => {
                     const energy = entry.energy_kwh || {};
-                    const total = Object.values(energy).reduce((a, b) => a + b, 0);
-                    return [new Date(entry.date).getTime(), total || 0];
+                    return [new Date(entry.date).getTime(), energy['Water Heater'] || 0];
                   }).reverse();
               - entity: sensor.smart_energy_manager_surplus_load_status
-                name: Runtime (h)
+                name: Floor Upstairs
                 type: column
-                color: "#2196f3"
+                color: "#fb8c00"
                 float_precision: 1
                 data_generator: >
                   const history =
                   entity.attributes.runtime_history || [];
 
                   return history.map(entry => {
-                    const total = Object.values(entry.loads || {}).reduce((a, b) => a + b, 0);
-                    return [new Date(entry.date).getTime(), total];
+                    const energy = entry.energy_kwh || {};
+                    return [new Date(entry.date).getTime(), energy['Floor Upstairs'] || 0];
                   }).reverse();
-            apex_config:
-              chart:
-                height: 200px
-              yaxis:
-                - title:
-                    text: kWh / hours
+              - entity: sensor.smart_energy_manager_surplus_load_status
+                name: Floor Downstairs
+                type: column
+                color: "#43a047"
+                float_precision: 1
+                data_generator: >
+                  const history =
+                  entity.attributes.runtime_history || [];
+
+                  return history.map(entry => {
+                    const energy = entry.energy_kwh || {};
+                    return [new Date(entry.date).getTime(), energy['Floor Downstairs'] || 0];
+                  }).reverse();
             grid_options:
               columns: 12
           - type: markdown
