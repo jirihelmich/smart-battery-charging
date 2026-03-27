@@ -586,18 +586,22 @@ class ChargingPlanner:
 
         # Simulate from now through end of today
         min_soc_reached = soc_kwh
+        max_soc_reached = soc_kwh
         reactive_claim_total = 0.0
         total_surplus = 0.0
+        minute_fraction = now.minute / 60.0
 
         for hour in range(now.hour, 24):
-            cons = self._hourly_consumption(hour, daily_consumption)
-            solar = solar_profile.get((0, hour), 0.0)
+            # For current hour, only simulate remaining fraction
+            hour_fraction = (1.0 - minute_fraction) if hour == now.hour else 1.0
+            cons = self._hourly_consumption(hour, daily_consumption) * hour_fraction
+            solar = solar_profile.get((0, hour), 0.0) * hour_fraction
 
             soc_kwh += solar - cons
 
             # Predictive load drains battery during its schedule
             if sched_start <= hour < sched_end:
-                soc_kwh -= load.power_kw
+                soc_kwh -= load.power_kw * hour_fraction
 
             # Battery overflow = surplus available for reactive loads
             if soc_kwh > max_soc_kwh:
@@ -620,9 +624,11 @@ class ChargingPlanner:
 
             if soc_kwh < min_soc_reached:
                 min_soc_reached = soc_kwh
+            if soc_kwh > max_soc_reached:
+                max_soc_reached = soc_kwh
 
         min_soc_pct = round(min_soc_reached / capacity * 100, 1)
-        peak_soc_pct = round(soc_kwh / capacity * 100, 1)
+        peak_soc_pct = round(max_soc_reached / capacity * 100, 1)
         surplus_budget = max(0.0, total_surplus - reactive_claim_total)
 
         # Check 1: SOC must not drop below min_soc

@@ -50,10 +50,19 @@ async def async_setup_entry(
 ) -> None:
     """Set up Smart Battery Charging binary sensors."""
     coordinator: SmartBatteryCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
+
+    entities: list[SmartBatteryBinarySensor | SurplusLoadActiveSensor] = [
         SmartBatteryBinarySensor(coordinator, description, entry)
         for description in BINARY_SENSOR_DESCRIPTIONS
-    )
+    ]
+
+    # Dynamic per-load "device on" binary sensors
+    surplus_loads = entry.options.get("surplus_loads", [])
+    for load_cfg in surplus_loads:
+        name = load_cfg["name"]
+        entities.append(SurplusLoadActiveSensor(coordinator, entry, name))
+
+    async_add_entities(entities)
 
 
 class SmartBatteryBinarySensor(
@@ -86,3 +95,42 @@ class SmartBatteryBinarySensor(
         if self.coordinator.data is None:
             return False
         return self.entity_description.value_fn(self.coordinator.data)
+
+
+class SurplusLoadActiveSensor(
+    CoordinatorEntity[SmartBatteryCoordinator], BinarySensorEntity
+):
+    """Binary sensor tracking whether a surplus load's device is on."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+
+    def __init__(
+        self,
+        coordinator: SmartBatteryCoordinator,
+        entry: ConfigEntry,
+        load_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        slug = load_name.lower().replace(" ", "_")
+        self._attr_unique_id = f"{entry.entry_id}_surplus_load_on_{slug}"
+        self._load_name = load_name
+        self._data_key = f"surplus_load_on_{load_name}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Smart Energy Manager",
+            "model": "Virtual",
+        }
+
+    @property
+    def name(self) -> str:
+        """Return the name."""
+        return f"{self._load_name} Active"
+
+    @property
+    def is_on(self) -> bool:
+        """Return true if the load's device is on."""
+        if self.coordinator.data is None:
+            return False
+        return self.coordinator.data.get(self._data_key, False)
