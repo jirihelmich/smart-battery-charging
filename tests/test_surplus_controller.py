@@ -58,6 +58,7 @@ def _make_coordinator(
     coord.store = MagicMock()
     coord.store.surplus_runtime_history = []
     coord.async_record_surplus_runtime = AsyncMock()
+    coord.grid_export_today = 0.0
     # Planner mock for surplus forecast (used by midnight recording)
     forecast_mock = MagicMock()
     forecast_mock.surplus_hours = 7
@@ -363,7 +364,7 @@ class TestRestoreState:
         })
 
         st = ctrl.states["switch.water_heater"]
-        assert st.last_switch_time == 1000.0
+        assert st.last_switch_time == 0.0  # monotonic not restored (invalid after restart)
         assert st.daily_runtime_seconds == 3600.0
 
     def test_restore_unknown_entity_ignored(self):
@@ -415,7 +416,8 @@ class TestMidnight:
         await ctrl.async_on_midnight()
 
         coord.async_record_surplus_runtime.assert_called_once_with(
-            {"Water Heater": 2.0}, surplus_hours=0, energy_data={}  # 7200s = 2h, surplus_hours=0 (no ticks ran)
+            {"Water Heater": 2.0}, surplus_hours=0, energy_data={},  # 7200s = 2h, surplus_hours=0 (no ticks ran)
+            grid_export_kwh=0.0,
         )
         # Runtime reset
         assert ctrl._states["switch.water_heater"].daily_runtime_seconds == 0.0

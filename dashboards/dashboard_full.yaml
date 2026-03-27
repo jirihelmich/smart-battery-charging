@@ -696,7 +696,7 @@ views:
                 yaxis_id: active
                 stroke_width: 0
                 opacity: 0.3
-                transform: "return x === 'on' ? 1 : 0;"
+                transform: "return x == 'on' || x === 1 ? 1 : 0;"
                 extend_to: end
                 group_by:
                   func: last
@@ -756,7 +756,7 @@ views:
                 yaxis_id: active
                 stroke_width: 0
                 opacity: 0.3
-                transform: "return x === 'on' ? 1 : 0;"
+                transform: "return x == 'on' || x === 1 ? 1 : 0;"
                 extend_to: end
                 group_by:
                   func: last
@@ -1339,9 +1339,10 @@ views:
               show: true
               title: Surplus Energy by Load
               show_states: false
-            graph_span: 7d
+            graph_span: 30d
             span:
               end: day
+              offset: +1d
             apex_config:
               chart:
                 height: 250
@@ -1395,6 +1396,18 @@ views:
                   return history.map(entry => {
                     const energy = entry.energy_kwh || {};
                     return [new Date(entry.date).getTime(), energy['Floor Downstairs'] || 0];
+                  }).reverse();
+              - entity: sensor.smart_energy_manager_surplus_load_status
+                name: Grid Export
+                type: column
+                color: "#78909c"
+                float_precision: 1
+                data_generator: >
+                  const history =
+                  entity.attributes.runtime_history || [];
+
+                  return history.map(entry => {
+                    return [new Date(entry.date).getTime(), entry.grid_export_kwh || 0];
                   }).reverse();
             grid_options:
               columns: 12

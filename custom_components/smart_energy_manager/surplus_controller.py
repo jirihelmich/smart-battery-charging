@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_GRID_EXPORT_POWER_SENSOR,
@@ -114,7 +115,8 @@ class SurplusLoadController:
         """Restore runtime states from storage."""
         for entity_id, data in stored.items():
             if entity_id in self._states:
-                self._states[entity_id].last_switch_time = data.get("last_switch_time", 0.0)
+                # Don't restore last_switch_time — it's monotonic and invalid after restart
+                self._states[entity_id].last_switch_time = 0.0
                 self._states[entity_id].daily_runtime_seconds = data.get("daily_runtime_seconds", 0.0)
                 self._states[entity_id].controlled_by_automation = data.get("controlled_by_automation", False)
                 self._states[entity_id].daily_energy_kwh = data.get("daily_energy_kwh", 0.0)
@@ -462,7 +464,7 @@ class SurplusLoadController:
 
         true_surplus = self._compute_true_surplus(grid_export)
 
-        _LOGGER.debug(
+        _LOGGER.info(
             "Surplus tick: grid_export=%.2f kW, true_surplus=%.2f kW, SOC=%.0f%%",
             grid_export, true_surplus, soc,
         )
@@ -498,6 +500,13 @@ class SurplusLoadController:
                     and soc >= cfg.battery_on_threshold
                     and available_surplus >= cfg.margin_on_kw
                 )
+                if not should_on:
+                    _LOGGER.info(
+                        "Reactive skip %s: temp_blocked=%s, soc=%.0f (need %.0f), "
+                        "surplus=%.2f (need %.2f)",
+                        cfg.name, temp_blocked, soc, cfg.battery_on_threshold,
+                        available_surplus, cfg.margin_on_kw,
+                    )
                 if should_on:
                     desired[cfg.switch_entity] = True
                     available_surplus -= cfg.power_kw
@@ -509,6 +518,12 @@ class SurplusLoadController:
             st = self._states[cfg.switch_entity]
             want_on = desired.get(cfg.switch_entity, False)
 
+            _LOGGER.info(
+                "Phase2 %s: want_on=%s, is_running=%s, device_on=%s, controlled=%s",
+                cfg.name, want_on, st.is_running,
+                self._is_device_on(cfg.switch_entity), st.controlled_by_automation,
+            )
+
             if want_on == st.is_running:
                 # Claim ownership if controller agrees device should be on
                 if want_on and not st.controlled_by_automation:
@@ -518,8 +533,8 @@ class SurplusLoadController:
             # Anti-flap: check minimum switch interval
             if st.last_switch_time > 0:
                 elapsed = monotonic_now - st.last_switch_time
-                if elapsed < cfg.min_switch_interval:
-                    _LOGGER.debug(
+                if 0 < elapsed < cfg.min_switch_interval:
+                    _LOGGER.info(
                         "Anti-flap: %s switch blocked (%.0fs < %ds)",
                         cfg.name, elapsed, cfg.min_switch_interval,
                     )
@@ -600,9 +615,11 @@ class SurplusLoadController:
         self._daily_surplus_seconds = 0.0
 
         if runtime_data:
+            grid_export = self._coordinator.grid_export_today
             await self._coordinator.async_record_surplus_runtime(
                 runtime_data, surplus_hours=surplus_hours,
                 energy_data=energy_data,
+                grid_export_kwh=grid_export,
             )
 
     def get_states_for_storage(self) -> dict[str, Any]:
@@ -659,6 +676,30 @@ class SurplusLoadController:
             for cfg in self._configs
         ), 2)
 
+        # Build today's in-progress entry for the runtime history chart
+        today_str = dt_util.now().strftime("%Y-%m-%d")
+        today_runtime: dict[str, float] = {}
+        today_energy: dict[str, float] = {}
+        for cfg in self._configs:
+            st = self._states.get(cfg.switch_entity, SurplusLoadState())
+            if st.daily_runtime_seconds > 0:
+                today_runtime[cfg.name] = round(st.daily_runtime_seconds / 3600, 2)
+            if st.daily_energy_kwh > 0:
+                today_energy[cfg.name] = round(st.daily_energy_kwh, 2)
+        today_entry: dict[str, Any] = {
+            "date": today_str,
+            "loads": today_runtime,
+            "surplus_hours": round(self._daily_surplus_seconds / 3600),
+            "energy_kwh": today_energy,
+            "grid_export_kwh": round(self._coordinator.grid_export_today, 2),
+        }
+        history = self._coordinator.store.surplus_runtime_history
+        # Prepend today's live data (replace if midnight already recorded today)
+        if history and history[0].get("date") == today_str:
+            runtime_history = [today_entry] + history[1:]
+        else:
+            runtime_history = [today_entry] + history
+
         return {
             "surplus_active_loads": len(active_loads),
             "surplus_active_load_names": ", ".join(active_loads) if active_loads else "None",
@@ -667,5 +708,5 @@ class SurplusLoadController:
             "surplus_true_surplus_kw": round(true_surplus, 2) if true_surplus is not None else None,
             "surplus_load_details": load_details,
             "surplus_utilization_factors": self.get_utilization_factors(),
-            "surplus_runtime_history": self._coordinator.store.surplus_runtime_history,
+            "surplus_runtime_history": runtime_history,
         }

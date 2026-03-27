@@ -582,6 +582,7 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         surplus_hours: int = 0,
         energy_data: dict[str, float] | None = None,
+        grid_export_kwh: float = 0.0,
     ) -> None:
         """Record daily surplus load runtimes and energy (called at midnight)."""
         now = dt_util.now()
@@ -591,6 +592,7 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "date": today_str,
             "loads": runtime_data,
             "surplus_hours": surplus_hours,
+            "grid_export_kwh": round(grid_export_kwh, 2),
         }
         if energy_data:
             entry["energy_kwh"] = energy_data
@@ -910,6 +912,10 @@ class SmartBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Surplus load data
         if self.surplus_controller and self.surplus_controller.configs:
             data.update(self.surplus_controller.get_sensor_data())
+            # Per-load device_on flags for binary sensors
+            for detail in data.get("surplus_load_details", []):
+                key = f"surplus_load_on_{detail['name']}"
+                data[key] = bool(detail.get("is_device_on", False))
         else:
             data["surplus_active_loads"] = 0
             data["surplus_active_load_names"] = "None"
