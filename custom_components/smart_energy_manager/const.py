@@ -149,6 +149,10 @@ DEFAULT_NOTIFY_BATTERY_LOW = True
 
 # Surplus load controller
 CONF_GRID_EXPORT_POWER_SENSOR = "grid_export_power_sensor"
+CONF_PV_POWER_SENSOR = "pv_power_sensor"
+CONF_HOUSE_CONSUMPTION_POWER_SENSOR = "house_consumption_power_sensor"
+CONF_PROACTIVE_SOC_THRESHOLD = "proactive_soc_threshold"
+DEFAULT_PROACTIVE_SOC_THRESHOLD = 80.0
 CONF_SURPLUS_LOADS = "surplus_loads"
 CONF_NOTIFY_SURPLUS_LOAD = "notify_surplus_load"
 DEFAULT_NOTIFY_SURPLUS_LOAD = True

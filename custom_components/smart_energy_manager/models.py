@@ -142,6 +142,7 @@ class SurplusForecast:
 class SurplusLoadConfig:
     """Configuration for a single surplus load."""
 
+    id: str  # Unique identifier (UUID)
     name: str
     switch_entity: str
     power_kw: float
@@ -171,9 +172,12 @@ class SurplusLoadState:
     daily_energy_kwh: float = 0.0  # today's accumulated energy (from power sensor)
     last_tick_time: float = 0.0  # for runtime accumulation
     # Predictive mode state
+    consecutive_off_ticks: int = 0  # consecutive ticks where turn-off was desired
+    # Predictive mode state
     predictive_approved: bool | None = None  # None=not evaluated, True/False
     predictive_aborted: bool = False  # True if mid-run abort happened today
     predictive_notified: bool = False  # True after ON notification sent for this schedule
+    last_notified_on: bool | None = None  # Last notification state (None=never notified)
 
 
 @dataclass(frozen=True)

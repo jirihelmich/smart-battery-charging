@@ -1358,6 +1358,7 @@ class TestEvaluatePredictiveLoad:
     def _make_predictive_load(self, power_kw=1.5, start=5, end=8):
         from smart_energy_manager.models import SurplusLoadConfig
         return SurplusLoadConfig(
+            id="test-floor-heating",
             name="Floor Heating",
             switch_entity="switch.floor_heating",
             power_kw=power_kw,
@@ -1370,6 +1371,7 @@ class TestEvaluatePredictiveLoad:
     def _make_reactive_load(self, power_kw=2.3, priority=1):
         from smart_energy_manager.models import SurplusLoadConfig
         return SurplusLoadConfig(
+            id="test-water-heater",
             name="Water Heater",
             switch_entity="switch.water_heater",
             power_kw=power_kw,

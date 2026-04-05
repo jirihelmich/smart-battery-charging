@@ -1251,10 +1251,10 @@ views:
               show: true
               title: Surplus Energy
               show_states: false
-            graph_span: 30d
+            graph_span: 31d
             span:
               end: day
-              offset: +1d
+              offset: +2d
             apex_config:
               chart:
                 height: 250

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 import voluptuous as vol
@@ -26,6 +27,7 @@ from .const import (
     CONF_FALLBACK_CONSUMPTION,
     CONF_GRID_EXPORT_POWER_SENSOR,
     CONF_GRID_EXPORT_SENSOR,
+    CONF_HOUSE_CONSUMPTION_POWER_SENSOR,
     CONF_GRID_IMPORT_SENSOR,
     CONF_INVERTER_AC_LOWER_LIMIT_NUMBER,
     CONF_INVERTER_ACTUAL_SOLAR_SENSOR,
@@ -58,6 +60,8 @@ from .const import (
     CONF_NOTIFY_SENSOR_UNAVAILABLE,
     CONF_NOTIFY_SURPLUS_LOAD,
     CONF_PRICE_ATTRIBUTE_FORMAT,
+    CONF_PROACTIVE_SOC_THRESHOLD,
+    CONF_PV_POWER_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_SOLAR_FORECAST_TODAY,
     CONF_SOLAR_FORECAST_TOMORROW,
@@ -88,6 +92,7 @@ from .const import (
     DEFAULT_NOTIFY_SENSOR_UNAVAILABLE,
     DEFAULT_NOTIFY_SURPLUS_LOAD,
     DEFAULT_PRICE_ATTRIBUTE_FORMAT,
+    DEFAULT_PROACTIVE_SOC_THRESHOLD,
     DEFAULT_SURPLUS_BATTERY_OFF,
     DEFAULT_SURPLUS_BATTERY_ON,
     DEFAULT_SURPLUS_MARGIN_OFF,
@@ -573,6 +578,18 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
                         default=current.get(CONF_GRID_EXPORT_POWER_SENSOR, ""),
                     ): _entity_selector("sensor"),
                     vol.Optional(
+                        CONF_PV_POWER_SENSOR,
+                        default=current.get(CONF_PV_POWER_SENSOR, ""),
+                    ): _entity_selector("sensor"),
+                    vol.Optional(
+                        CONF_HOUSE_CONSUMPTION_POWER_SENSOR,
+                        default=current.get(CONF_HOUSE_CONSUMPTION_POWER_SENSOR, ""),
+                    ): _entity_selector("sensor"),
+                    vol.Optional(
+                        CONF_PROACTIVE_SOC_THRESHOLD,
+                        default=current.get(CONF_PROACTIVE_SOC_THRESHOLD, DEFAULT_PROACTIVE_SOC_THRESHOLD),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=50, max=100)),
+                    vol.Optional(
                         CONF_OUTDOOR_TEMP_SENSOR,
                         default=current.get(CONF_OUTDOOR_TEMP_SENSOR, ""),
                     ): _entity_selector("sensor"),
@@ -658,15 +675,14 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
             menu_options.append("surplus_edit")
             menu_options.append("surplus_remove")
 
-        # Build description showing current loads
+        # Build description showing current loads as a table
         if loads:
-            load_lines = "\n".join(
-                f"  {i+1}. **{ld['name']}** — {ld['power_kw']} kW, "
-                f"priority {ld.get('priority', 1)}, "
-                f"entity: `{ld['switch_entity']}`"
+            header = "| # | Name | Mode | Power | Priority |\n|---|------|------|-------|----------|\n"
+            rows = "\n".join(
+                f"| {i+1} | {ld['name']} | {ld.get('mode', 'reactive')} | {ld['power_kw']} kW | {ld.get('priority', 1)} |"
                 for i, ld in enumerate(loads)
             )
-            description = f"**Configured loads:**\n{load_lines}"
+            description = f"**Configured loads:**\n\n{header}{rows}"
         else:
             description = "No surplus loads configured."
 
@@ -682,6 +698,7 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
         """Add a new surplus load — basic config."""
         if user_input is not None:
             self._pending_load = {
+                "id": str(uuid.uuid4()),
                 "name": user_input["name"],
                 "switch_entity": user_input["switch_entity"],
                 "power_kw": user_input["power_kw"],
@@ -813,23 +830,34 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
         loads = self._get_surplus_loads()
 
         if user_input is not None:
-            edit_name = user_input.get("load_to_edit", "")
+            edit_id = user_input.get("load_to_edit", "")
             for i, ld in enumerate(loads):
-                if ld["name"] == edit_name:
+                if ld.get("id") == edit_id:
                     self._editing_load_index = i
                     self._pending_load = dict(ld)
                     return await self.async_step_surplus_edit_form()
             return await self.async_step_surplus_menu()
 
-        load_names = [ld["name"] for ld in loads]
-        if not load_names:
+        if not loads:
             return await self.async_step_surplus_menu()
 
+        load_options = [
+            selector.SelectOptionDict(
+                value=ld["id"],
+                label=f"{ld['name']} ({ld.get('mode', 'reactive')})",
+            )
+            for ld in loads
+        ]
         return self.async_show_form(
             step_id="surplus_edit",
             data_schema=vol.Schema(
                 {
-                    vol.Required("load_to_edit"): _select_selector(load_names),
+                    vol.Required("load_to_edit"): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=load_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
         )
@@ -979,22 +1007,33 @@ class SmartBatteryChargingOptionsFlow(OptionsFlow):
         loads = self._get_surplus_loads()
 
         if user_input is not None:
-            remove_name = user_input.get("load_to_remove", "")
-            new_loads = [ld for ld in loads if ld["name"] != remove_name]
+            remove_id = user_input.get("load_to_remove", "")
+            new_loads = [ld for ld in loads if ld.get("id") != remove_id]
             self._options[CONF_SURPLUS_LOADS] = new_loads
             return self.async_create_entry(
                 title="", data={**self._config_entry.options, **self._options}
             )
 
-        load_names = [ld["name"] for ld in loads]
-        if not load_names:
+        if not loads:
             return await self.async_step_surplus_menu()
 
+        load_options = [
+            selector.SelectOptionDict(
+                value=ld["id"],
+                label=f"{ld['name']} ({ld.get('mode', 'reactive')})",
+            )
+            for ld in loads
+        ]
         return self.async_show_form(
             step_id="surplus_remove",
             data_schema=vol.Schema(
                 {
-                    vol.Required("load_to_remove"): _select_selector(load_names),
+                    vol.Required("load_to_remove"): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=load_options,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
         )

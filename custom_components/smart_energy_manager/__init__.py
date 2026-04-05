@@ -7,6 +7,7 @@ Computes charging schedules and controls the inverter via Modbus services.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
@@ -58,9 +59,28 @@ def _restore_schedule_from_dict(data: dict) -> ChargingSchedule | None:
         return None
 
 
+async def _migrate_surplus_load_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Assign UUIDs to surplus loads that don't have one yet."""
+    options = dict(entry.options)
+    loads = options.get("surplus_loads", [])
+    if not loads or not isinstance(loads, list):
+        return
+    migrated = False
+    for ld in loads:
+        if isinstance(ld, dict) and "id" not in ld:
+            ld["id"] = str(uuid.uuid4())
+            migrated = True
+    if migrated:
+        hass.config_entries.async_update_entry(entry, options=options)
+        _LOGGER.info("Migrated %d surplus loads: assigned UUIDs", len(loads))
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Battery Charging from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+
+    # Migrate: assign UUIDs to surplus loads that don't have one
+    await _migrate_surplus_load_ids(hass, entry)
 
     # Initialize storage
     store = SmartBatteryStore(hass, entry.entry_id)

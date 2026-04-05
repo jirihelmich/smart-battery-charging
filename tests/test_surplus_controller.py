@@ -94,6 +94,7 @@ def _make_hass(
 
 
 WATER_HEATER_LOAD = {
+    "id": "test-water-heater",
     "name": "Water Heater",
     "switch_entity": "switch.water_heater",
     "power_kw": 2.3,
@@ -106,6 +107,7 @@ WATER_HEATER_LOAD = {
 }
 
 FLOOR_HEATING_LOAD = {
+    "id": "test-floor-heating",
     "name": "Floor Heating",
     "switch_entity": "switch.floor_heating",
     "power_kw": 1.5,
@@ -223,17 +225,21 @@ class TestSurplusTick:
 
     @pytest.mark.asyncio
     async def test_turn_off_when_soc_drops(self):
-        """Turn off when SOC drops below off threshold."""
+        """Turn off when SOC drops below off threshold (after 3 consecutive ticks)."""
         hass = _make_hass(grid_export_kw=0.5, switch_states={"switch.water_heater": "on"})
         coord = _make_coordinator(soc=93.0, surplus_loads=[WATER_HEATER_LOAD])
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
 
+        # Need 3 consecutive off ticks before actual turn-off
+        await ctrl.async_on_tick()
+        await ctrl.async_on_tick()
         await ctrl.async_on_tick()
 
-        hass.services.async_call.assert_called_once_with(
+        hass.services.async_call.assert_any_call(
             "switch", "turn_off", {"entity_id": "switch.water_heater"}
         )
+        assert not ctrl._states["test-water-heater"].is_running
 
     @pytest.mark.asyncio
     async def test_stay_on_when_true_surplus_ok(self):
@@ -252,7 +258,7 @@ class TestSurplusTick:
 
     @pytest.mark.asyncio
     async def test_turn_off_when_true_surplus_low(self):
-        """Turn off when true surplus drops below threshold."""
+        """Turn off when true surplus drops below threshold (after 3 ticks)."""
         # Grid export is -1.5 kW (importing), load is running (2.3 kW)
         # True surplus = -1.5 + 2.3 = 0.8 kW
         # Turn off: true_surplus (0.8) < power_kw (2.3) - margin_off (0.5) = 1.8
@@ -262,10 +268,13 @@ class TestSurplusTick:
         ctrl.load_configs()
 
         await ctrl.async_on_tick()
+        await ctrl.async_on_tick()
+        await ctrl.async_on_tick()
 
-        hass.services.async_call.assert_called_once_with(
+        hass.services.async_call.assert_any_call(
             "switch", "turn_off", {"entity_id": "switch.water_heater"}
         )
+        assert not ctrl._states["test-water-heater"].is_running
 
     @pytest.mark.asyncio
     async def test_anti_flap_blocks_switch(self):
@@ -275,7 +284,7 @@ class TestSurplusTick:
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
         # Set last switch time to just now
-        ctrl._states["switch.water_heater"].last_switch_time = time.monotonic()
+        ctrl._states["test-water-heater"].last_switch_time = time.monotonic()
 
         await ctrl.async_on_tick()
 
@@ -363,7 +372,7 @@ class TestRestoreState:
             }
         })
 
-        st = ctrl.states["switch.water_heater"]
+        st = ctrl.states["test-water-heater"]
         assert st.last_switch_time == 0.0  # monotonic not restored (invalid after restart)
         assert st.daily_runtime_seconds == 3600.0
 
@@ -411,7 +420,7 @@ class TestMidnight:
         coord = _make_coordinator(surplus_loads=[WATER_HEATER_LOAD])
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
-        ctrl._states["switch.water_heater"].daily_runtime_seconds = 7200.0
+        ctrl._states["test-water-heater"].daily_runtime_seconds = 7200.0
 
         await ctrl.async_on_midnight()
 
@@ -420,7 +429,7 @@ class TestMidnight:
             grid_export_kwh=0.0,
         )
         # Runtime reset
-        assert ctrl._states["switch.water_heater"].daily_runtime_seconds == 0.0
+        assert ctrl._states["test-water-heater"].daily_runtime_seconds == 0.0
 
     @pytest.mark.asyncio
     async def test_midnight_resets_predictive_state(self):
@@ -431,13 +440,13 @@ class TestMidnight:
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
         # Simulate that it was evaluated today
-        ctrl._states["switch.floor_heating"].predictive_approved = True
-        ctrl._states["switch.floor_heating"].predictive_aborted = True
+        ctrl._states["test-floor-heating"].predictive_approved = True
+        ctrl._states["test-floor-heating"].predictive_aborted = True
 
         await ctrl.async_on_midnight()
 
-        assert ctrl._states["switch.floor_heating"].predictive_approved is None
-        assert ctrl._states["switch.floor_heating"].predictive_aborted is False
+        assert ctrl._states["test-floor-heating"].predictive_approved is None
+        assert ctrl._states["test-floor-heating"].predictive_aborted is False
 
 
 class TestUtilizationFactors:
@@ -551,7 +560,7 @@ class TestPredictiveTick:
         coord.planner = None  # No planner means no evaluation — set approved manually
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
-        ctrl._states["switch.floor_heating"].predictive_approved = True
+        ctrl._states["test-floor-heating"].predictive_approved = True
         ctrl._get_now = lambda: self._make_dt_util_mock(5, 0)
 
         await ctrl.async_on_tick()
@@ -572,7 +581,7 @@ class TestPredictiveTick:
         coord.planner = None
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
-        ctrl._states["switch.floor_heating"].predictive_approved = False
+        ctrl._states["test-floor-heating"].predictive_approved = False
         ctrl._get_now = lambda: self._make_dt_util_mock(5, 0)
 
         await ctrl.async_on_tick()
@@ -593,7 +602,7 @@ class TestPredictiveTick:
         coord.planner = None
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
-        ctrl._states["switch.floor_heating"].predictive_approved = True
+        ctrl._states["test-floor-heating"].predictive_approved = True
         ctrl._get_now = lambda: self._make_dt_util_mock(8, 0)  # At schedule end
 
         await ctrl.async_on_tick()
@@ -617,7 +626,7 @@ class TestPredictiveTick:
         coord.planner = None
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
-        ctrl._states["switch.floor_heating"].predictive_approved = False  # Denied
+        ctrl._states["test-floor-heating"].predictive_approved = False  # Denied
         ctrl._get_now = lambda: self._make_dt_util_mock(10, 0)
 
         await ctrl.async_on_tick()
@@ -637,7 +646,7 @@ class TestSensorDataPredictive:
         coord = _make_coordinator(surplus_loads=[PREDICTIVE_FLOOR_HEATING])
         ctrl = SurplusLoadController(hass, coord)
         ctrl.load_configs()
-        ctrl._states["switch.floor_heating"].predictive_approved = True
+        ctrl._states["test-floor-heating"].predictive_approved = True
 
         data = ctrl.get_sensor_data()
         details = data["surplus_load_details"]
